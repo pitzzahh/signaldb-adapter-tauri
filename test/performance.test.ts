@@ -434,10 +434,24 @@ describe('Performance Tests', () => {
   let tester: PerformanceTester;
   let encryptedTester: PerformanceTester;
   let nestedTester: NestedPerformanceTester;
+  let originalConsoleWarn: typeof console.warn;
 
   beforeEach(async () => {
     // Clear the mock filesystem before each test
     mock_file_system.clear();
+
+    // Suppress non-critical warnings for cleaner test output
+    originalConsoleWarn = console.warn;
+    console.warn = (...args: any[]) => {
+      const message = args.join(' ');
+      // Only suppress specific expected warnings
+      if (message.includes('[SECURITY WARNING]') ||
+        message.includes('Failed to create backup') ||
+        message.includes('Incremental update mismatch')) {
+        return; // Suppress these expected warnings
+      }
+      originalConsoleWarn(...args); // Show other warnings
+    };
 
     tester = new PerformanceTester('perf-test.json');
     encryptedTester = new PerformanceTester('perf-test-encrypted.json', true);
@@ -455,6 +469,9 @@ describe('Performance Tests', () => {
 
     // Clear the mock filesystem after each test
     mock_file_system.clear();
+
+    // Restore original console.warn
+    console.warn = originalConsoleWarn;
   });
 
   test('Insert performance - small dataset (100 items)', async () => {
@@ -746,60 +763,76 @@ describe('Performance Tests', () => {
   test('Scaling comparison: simple vs nested data', async () => {
     const itemCount = 50;
 
-    // Test simple data
-    mock_file_system.clear();
-    const simpleTester = new PerformanceTester('simple-comparison.json');
-    await simpleTester.initialize();
-    const simpleTime = await simpleTester.testInsertPerformance(itemCount);
-    await simpleTester.cleanup();
+    // Temporarily suppress warnings for this comparison test
+    const tempWarn = console.warn;
+    console.warn = () => { };
 
-    // Test nested data
-    mock_file_system.clear();
-    const nestedComparisonTester = new NestedPerformanceTester('nested-comparison.json');
-    await nestedComparisonTester.initialize();
-    const nestedTime = await nestedComparisonTester.testNestedInsertPerformance(itemCount);
-    await nestedComparisonTester.cleanup();
+    try {
+      // Test simple data
+      mock_file_system.clear();
+      const simpleTester = new PerformanceTester('simple-comparison.json');
+      await simpleTester.initialize();
+      const simpleTime = await simpleTester.testInsertPerformance(itemCount);
+      await simpleTester.cleanup();
 
-    const overhead = ((nestedTime / simpleTime - 1) * 100);
+      // Test nested data
+      mock_file_system.clear();
+      const nestedComparisonTester = new NestedPerformanceTester('nested-comparison.json');
+      await nestedComparisonTester.initialize();
+      const nestedTime = await nestedComparisonTester.testNestedInsertPerformance(itemCount);
+      await nestedComparisonTester.cleanup();
 
-    formatPerformanceTable('Simple vs Nested Data Comparison', [
-      { label: 'Items processed', value: itemCount },
-      { label: 'Simple data time', value: simpleTime, unit: 'ms' },
-      { label: 'Nested data time', value: nestedTime, unit: 'ms' },
-      { label: 'Nested overhead', value: overhead, unit: '%' },
-      { label: 'Performance ratio', value: `1:${(nestedTime / simpleTime).toFixed(1)}` }
-    ]);
+      const overhead = ((nestedTime / simpleTime - 1) * 100);
 
-    // Nested data should be slower but not excessively
-    expect(nestedTime).toBeLessThan(simpleTime * 10); // Max 10x slower for nested data
+      formatPerformanceTable('Simple vs Nested Data Comparison', [
+        { label: 'Items processed', value: itemCount },
+        { label: 'Simple data time', value: simpleTime, unit: 'ms' },
+        { label: 'Nested data time', value: nestedTime, unit: 'ms' },
+        { label: 'Nested overhead', value: overhead, unit: '%' },
+        { label: 'Performance ratio', value: `1:${(nestedTime / simpleTime).toFixed(1)}` }
+      ]);
+
+      // Nested data should be slower but not excessively
+      expect(nestedTime).toBeLessThan(simpleTime * 10); // Max 10x slower for nested data
+    } finally {
+      console.warn = tempWarn; // Restore console.warn
+    }
   });
 
   test('Scaling test with performance tracking', async () => {
     const sizes = [25, 50, 75, 100];
     const results: Array<{ size: number; time: number; avgTime: number; throughput: number }> = [];
 
-    for (const size of sizes) {
-      mock_file_system.clear();
+    // Temporarily suppress warnings for scaling test
+    const tempWarn = console.warn;
+    console.warn = () => { };
 
-      const scaleTester = new PerformanceTester(`scale-${size}.json`);
-      await scaleTester.initialize();
+    try {
+      for (const size of sizes) {
+        mock_file_system.clear();
 
-      const time = await scaleTester.testInsertPerformance(size);
-      const avgTime = time / size;
-      const throughput = size / (time / 1000); // items per second
+        const scaleTester = new PerformanceTester(`scale-${size}.json`);
+        await scaleTester.initialize();
 
-      results.push({ size, time, avgTime, throughput });
+        const time = await scaleTester.testInsertPerformance(size);
+        const avgTime = time / size;
+        const throughput = size / (time / 1000); // items per second
 
-      await scaleTester.cleanup();
+        results.push({ size, time, avgTime, throughput });
+
+        await scaleTester.cleanup();
+      }
+
+      formatScalingTable('Comprehensive Scaling Analysis', results);
+
+      // Check that throughput doesn't degrade too much
+      const firstThroughput = results[0].throughput;
+      const lastThroughput = results[results.length - 1].throughput;
+
+      // Throughput should not degrade by more than 90%
+      expect(lastThroughput).toBeGreaterThan(firstThroughput * 0.1);
+    } finally {
+      console.warn = tempWarn; // Restore console.warn
     }
-
-    formatScalingTable('Comprehensive Scaling Analysis', results);
-
-    // Check that throughput doesn't degrade too much
-    const firstThroughput = results[0].throughput;
-    const lastThroughput = results[results.length - 1].throughput;
-
-    // Throughput should not degrade by more than 90%
-    expect(lastThroughput).toBeGreaterThan(firstThroughput * 0.1);
   });
 });

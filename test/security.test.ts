@@ -1,4 +1,4 @@
-import { test, expect, beforeEach, mock } from 'bun:test';
+import { test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { BaseDirectory } from '@tauri-apps/plugin-fs';
 import { createTauriFileSystemAdapter } from '../src/index';
 
@@ -54,12 +54,35 @@ mock.module('@tauri-apps/plugin-fs', () => ({
   }
 }));
 
+// Global warning suppression for cleaner test output
+let originalConsoleWarn: typeof console.warn;
+
 beforeEach(() => {
   mock_file_system.clear();
   mock_exists.mockClear();
   mock_read_file.mockClear();
   mock_write_file.mockClear();
   mock_remove.mockClear();
+
+  // Suppress non-critical warnings for cleaner test output
+  originalConsoleWarn = console.warn;
+  console.warn = (...args: any[]) => {
+    const message = args.join(' ');
+    // Only suppress specific expected warnings
+    if (message.includes('[SECURITY WARNING]') ||
+      message.includes('Failed to create backup') ||
+      message.includes('Incremental update mismatch')) {
+      return; // Suppress these expected warnings
+    }
+    originalConsoleWarn(...args); // Show other warnings
+  };
+});
+
+// Add afterEach to restore console.warn
+afterEach(() => {
+  if (originalConsoleWarn) {
+    console.warn = originalConsoleWarn;
+  }
 });
 
 test('Security: Filename validation prevents path traversal', () => {

@@ -1,4 +1,4 @@
-import { test, expect, beforeEach, mock } from 'bun:test';
+import { test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { BaseDirectory } from '@tauri-apps/plugin-fs';
 
 // Test data interface
@@ -86,6 +86,9 @@ mock.module('@tauri-apps/plugin-fs', () => ({
 // Import after mocking
 const { createTauriFileSystemAdapter } = await import('../src/index');
 
+// Global warning suppression for cleaner test output
+let originalConsoleWarn: typeof console.warn;
+
 beforeEach(() => {
   // Clear the mock filesystem and reset mock calls before each test
   mock_file_system.clear();
@@ -94,6 +97,26 @@ beforeEach(() => {
   mock_write_file.mockClear();
   mock_open.mockClear();
   mock_remove.mockClear();
+
+  // Suppress non-critical warnings for cleaner test output
+  originalConsoleWarn = console.warn;
+  console.warn = (...args: any[]) => {
+    const message = args.join(' ');
+    // Only suppress specific expected warnings
+    if (message.includes('[SECURITY WARNING]') ||
+      message.includes('Failed to create backup') ||
+      message.includes('Incremental update mismatch')) {
+      return; // Suppress these expected warnings
+    }
+    originalConsoleWarn(...args); // Show other warnings
+  };
+});
+
+// Add afterEach to restore console.warn
+afterEach(() => {
+  if (originalConsoleWarn) {
+    console.warn = originalConsoleWarn;
+  }
 });
 
 test('Basic adapter functionality', () => {
