@@ -55,7 +55,6 @@ const mock_open = mock(async (filename: string, options: { write?: boolean; crea
 const mock_remove = mock(async (filename: string, options?: { baseDir?: BaseDirectory }): Promise<void> => {
   const base_dir = options?.baseDir || BaseDirectory.AppLocalData;
   const full_path = `${base_dir}/${filename}`;
-  console.log({ full_path })
   mock_file_system.delete(full_path);
 });
 
@@ -302,27 +301,46 @@ test('Multiple adapters with different files', async () => {
 });
 
 test('Handles save errors gracefully', async () => {
+  let should_fail_encryption = false;
+
   const adapter = createTauriFilesystemAdapter<TestData>('test.json', {
-    encrypt: async () => {
-      throw new Error('Encryption failed');
+    encrypt: async (data) => {
+      if (should_fail_encryption) {
+        throw new Error('Encryption failed');
+      }
+      return JSON.stringify(data); // Normal encryption for register
     },
   });
   if (!adapter) return;
 
   const test_data: TestData[] = [{ id: '1', name: 'Test', value: 100 }];
 
-  // Register will fail due to encryption error, so the file won't be created
-  try {
-    await adapter.register(() => { });
-  } catch (error) {
-    // Expected to fail
-  }
+  // Register should succeed (encryption not failing yet)
+  await adapter.register(() => { });
+
+  // File should be created during register
+  expect(mock_file_system.has('AppLocalData/test.json')).toBe(true);
+
+  // Now enable encryption failure for save operation
+  should_fail_encryption = true;
 
   // Should throw error on save due to encryption failure
-  await expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] })).rejects.toThrow('Failed to save data to test.json');
+  expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] })).rejects.toThrow('Failed to save data to test.json');
+});
+
+test('Handles register encryption errors gracefully', async () => {
+  const adapter = createTauriFilesystemAdapter<TestData>('register-error-test.json', {
+    encrypt: async () => {
+      throw new Error('Encryption failed during register');
+    },
+  });
+  if (!adapter) return;
+
+  // Register should fail due to encryption error
+  expect(adapter.register(() => { })).rejects.toThrow('Failed to initialize file register-error-test.json');
 
   // File should not exist since register failed
-  expect(mock_file_system.has('AppLocalData/test.json')).toBe(false);
+  expect(mock_file_system.has('AppLocalData/register-error-test.json')).toBe(false);
 });
 
 // Helper function to inspect the mock filesystem state
@@ -335,17 +353,17 @@ function get_mock_file_system_state() {
 }
 
 test('Mock filesystem state inspection', async () => {
-  const adapter1 = createTauriFilesystemAdapter<TestData>('app1.json');
-  const adapter2 = createTauriFilesystemAdapter<TestData>('app2.json', {
+  const adapter_1 = createTauriFilesystemAdapter<TestData>('app1.json');
+  const adapter_2 = createTauriFilesystemAdapter<TestData>('app2.json', {
     base_dir: BaseDirectory.AppConfig
   });
-  if (!adapter1 || !adapter2) return;
+  if (!adapter_1 || !adapter_2) return;
 
-  await adapter1.register(() => { });
-  await adapter2.register(() => { });
+  await adapter_1.register(() => { });
+  await adapter_2.register(() => { });
 
-  await adapter1.save([{ id: '1', name: 'App1 Data', value: 1 }], { added: [{ id: '1', name: 'App1 Data', value: 1 }], modified: [], removed: [] });
-  await adapter2.save([{ id: '2', name: 'App2 Data', value: 2 }], { added: [{ id: '2', name: 'App2 Data', value: 2 }], modified: [], removed: [] });
+  await adapter_1.save([{ id: '1', name: 'App1 Data', value: 1 }], { added: [{ id: '1', name: 'App1 Data', value: 1 }], modified: [], removed: [] });
+  await adapter_2.save([{ id: '2', name: 'App2 Data', value: 2 }], { added: [{ id: '2', name: 'App2 Data', value: 2 }], modified: [], removed: [] });
 
   const state = get_mock_file_system_state();
 
