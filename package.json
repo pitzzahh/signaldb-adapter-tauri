@@ -41,15 +41,14 @@
   "peerDependencies": {
     "@signaldb/core": "1.x",
     "@tauri-apps/api": "2.x",
-    "typescript": "5.x"
+    "@tauri-apps/plugin-fs": "2.x"
   },
   "devDependencies": {
     "@tauri-apps/plugin-fs": "^2.4.0",
     "@tauri-apps/api": "^2.0.0",
     "@signaldb/core": "^1.0.0",
     "@types/bun": "latest",
-    "bun-types": "latest",
-    "jsdom": "^25.0.0"
+    "bun-types": "latest"
   },
   "engines": {
     "node": ">=18.0.0"
