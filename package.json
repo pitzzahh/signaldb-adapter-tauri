@@ -48,7 +48,8 @@
     "@tauri-apps/api": "^2.0.0",
     "@signaldb/core": "^1.0.0",
     "@types/bun": "latest",
-    "bun-types": "latest"
+    "bun-types": "latest",
+    "typescript": "^5.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
