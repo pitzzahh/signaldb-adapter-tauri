@@ -430,3 +430,90 @@ test('Initial data callback on register', async () => {
     items: [{ id: "1", name: "existing", value: 123 }]
   });
 });
+
+test('Save uses incremental changes correctly', async () => {
+  const adapter = createTauriFilesystemAdapter<TestData>('incremental-test.json');
+  if (!adapter) return;
+
+  // Initial data
+  const initialData: TestData[] = [
+    { id: '1', name: 'Original Item 1', value: 100 },
+    { id: '2', name: 'Original Item 2', value: 200 },
+    { id: '3', name: 'Original Item 3', value: 300 }
+  ];
+
+  await adapter.register(() => { });
+  await adapter.save(initialData, { added: initialData, modified: [], removed: [] });
+
+  // Verify initial save
+  let result = await adapter.load();
+  expect(result.items).toEqual(initialData);
+
+  // Now perform incremental updates
+  const changes = {
+    added: [{ id: '4', name: 'New Item', value: 400 }],
+    modified: [{ id: '2', name: 'Updated Item 2', value: 250 }],
+    removed: [{ id: '3', name: 'Original Item 3', value: 300 }]
+  };
+
+  const expectedFinalData: TestData[] = [
+    { id: '1', name: 'Original Item 1', value: 100 },
+    { id: '2', name: 'Updated Item 2', value: 250 },
+    { id: '4', name: 'New Item', value: 400 }
+  ];
+
+  await adapter.save(expectedFinalData, changes);
+
+  // Verify incremental changes were applied correctly
+  result = await adapter.load();
+  expect(result.items).toEqual(expectedFinalData);
+});
+
+test('Save handles empty changes gracefully', async () => {
+  const adapter = createTauriFilesystemAdapter<TestData>('empty-changes-test.json');
+  if (!adapter) return;
+
+  const testData: TestData[] = [
+    { id: '1', name: 'Test Item', value: 100 }
+  ];
+
+  await adapter.register(() => { });
+
+  // Save with empty changes
+  await adapter.save(testData, { added: [], modified: [], removed: [] });
+
+  const result = await adapter.load();
+  expect(result.items).toEqual(testData);
+});
+
+test('Save falls back to full save on mismatch', async () => {
+  const adapter = createTauriFilesystemAdapter<TestData>('fallback-test.json');
+  if (!adapter) return;
+
+  // Initial data
+  const initialData: TestData[] = [
+    { id: '1', name: 'Item 1', value: 100 }
+  ];
+
+  await adapter.register(() => { });
+  await adapter.save(initialData, { added: initialData, modified: [], removed: [] });
+
+  // Create a mismatch scenario - changes don't match final items
+  const finalItems: TestData[] = [
+    { id: '1', name: 'Item 1', value: 100 },
+    { id: '2', name: 'Item 2', value: 200 },
+    { id: '3', name: 'Item 3', value: 300 }
+  ];
+
+  const incorrectChanges = {
+    added: [{ id: '2', name: 'Item 2', value: 200 }], // Missing item 3
+    modified: [],
+    removed: []
+  };
+
+  // Should fall back to saving the complete finalItems array
+  await adapter.save(finalItems, incorrectChanges);
+
+  const result = await adapter.load();
+  expect(result.items).toEqual(finalItems);
+});
