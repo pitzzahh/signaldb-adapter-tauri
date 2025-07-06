@@ -239,14 +239,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- [SignalDB](https://github.com/signaldb/signaldb) - The reactive database this adapter is built for
+- [SignalDB](https://signaldb.js.org/) - The reactive database this adapter is built for
 - [Tauri](https://tauri.app/) - The framework that makes secure desktop apps possible
 - [Bun](https://bun.sh/) - The fast JavaScript runtime used for development
-
-## � Related Projects
-
-- [SignalDB](https://github.com/signaldb/signaldb) - The reactive database library
-- [Tauri Plugins](https://github.com/tauri-apps/plugins-workspace) - Official Tauri plugins
 
 ---
 
