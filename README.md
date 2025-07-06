@@ -10,11 +10,11 @@ A robust and secure persistence adapter for [SignalDB](https://github.com/signal
 
 - 🚀 **Zero Configuration** - Works out of the box with sensible defaults
 - 💾 **Native Tauri Integration** - Uses Tauri's secure filesystem API
-- � **Optional Encryption** - Protect your data with custom encryption functions
+- 🔐 **Optional Encryption** - Protect your data with custom encryption functions
 - 📱 **Cross-Platform** - Works on Windows, macOS, and Linux
 - 🛡️ **Type Safe** - Full TypeScript support with comprehensive type definitions
-- ⚡ **Lightweight** - Minimal dependencies, maximum performance
-- 🔄 **Auto-Recovery** - Graceful fallback for corrupted or encrypted data
+- ⚡ **Zero Dependencies** - No runtime dependencies, maximum performance
+- 🔄 **Auto-Recovery** - Graceful fallback for corrupted or encrypted data files
 
 ## 📦 Installation
 
@@ -194,6 +194,8 @@ todos.insert(newTodo);
 - **SignalDB**: v1.0 or higher  
 - **Node.js**: v18.0 or higher
 - **TypeScript**: v5.0 or higher (optional but recommended)
+
+> **Note**: This adapter has zero runtime dependencies. All required packages (`@tauri-apps/api`, `@tauri-apps/plugin-fs`, and `@signaldb/core`) are peer dependencies that should already be installed in your Tauri + SignalDB project.
 
 ## 📂 Storage Locations
 
