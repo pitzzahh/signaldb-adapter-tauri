@@ -176,7 +176,7 @@ test('Save and load data correctly', async () => {
   expect(load_result.items).toEqual(test_data);
 
   // Verify the correct Tauri functions were called
-  expect(mock_open).toHaveBeenCalled();
+  expect(mock_write_file).toHaveBeenCalled();
   expect(mock_read_file).toHaveBeenCalledWith('users.json', { baseDir: 'AppLocalData' });
 });
 
@@ -210,8 +210,8 @@ test('Load handles non-existent file', async () => {
   const result = await adapter.load();
   expect(result.items).toEqual([]);
 
-  // Verify exists was called
-  expect(mock_exists).toHaveBeenCalledWith('nonexistent.json', { baseDir: 'AppLocalData' });
+  // Verify readFile was called and handled the file not found error
+  expect(mock_read_file).toHaveBeenCalledWith('nonexistent.json', { baseDir: 'AppLocalData' });
 });
 
 test('Load handles empty file', async () => {
