@@ -247,3 +247,5 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
     }
   }) as PersistenceAdapter<T, ID>;
 }
+
+export type { EncryptFunction, DecryptFunction } from './types';
