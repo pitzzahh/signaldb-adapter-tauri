@@ -63,8 +63,7 @@ function formatPerformanceTable(title: string, data: Array<{ label: string; valu
   const rightPadding = titlePadding - leftPadding;
 
   // Top border with centered title - ensure exact width match
-  const titleBar = `┌─${' '.repeat(leftPadding)}${title}${' '.repeat(rightPadding)}─┐`;
-  console.log(`\n${titleBar}`);
+  console.log(`\n┌─${' '.repeat(leftPadding)}${title}${' '.repeat(rightPadding)}─┐`);
 
   // Header separator
   console.log(`├${'─'.repeat(LABEL_WIDTH + 2)}┼${'─'.repeat(VALUE_WIDTH + 2)}┤`);
@@ -99,8 +98,7 @@ function formatScalingTable(title: string, results: Array<{ size: number; time: 
   const rightPadding = titlePadding - leftPadding;
 
   // Top border with centered title - ensure exact width match
-  const titleBar = `┌─${' '.repeat(leftPadding)}${title}${' '.repeat(rightPadding)}─┐`;
-  console.log(`\n${titleBar}`);
+  console.log(`\n┌─${' '.repeat(leftPadding)}${title}${' '.repeat(rightPadding)}─┐`);
 
   // Headers with proper spacing
   console.log(`│${'Size'.padStart(SIZE_WIDTH + 1)}│${'Total (ms)'.padStart(TIME_WIDTH + 1)}│${'Avg (ms)'.padStart(AVG_WIDTH + 1)}│${'Throughput (items/sec)'.padStart(THROUGHPUT_WIDTH + 1)}│`);
