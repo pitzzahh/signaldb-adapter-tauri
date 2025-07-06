@@ -40,12 +40,12 @@ bun add @pitzzahh/signaldb-adapter-tauri
 
 ```typescript
 import { Collection } from '@signaldb/core';
-import { createTauriFilesystemAdapter } from '@pitzzahh/signaldb-adapter-tauri';
+import { createTauriFileSystemAdapter } from '@pitzzahh/signaldb-adapter-tauri';
 
 // Create a collection with filesystem persistence
 const users = new Collection({
   name: 'users',
-  persistence: createTauriFilesystemAdapter('users.json')
+  persistence: createTauriFileSystemAdapter('users.json')
 });
 
 // Your data is now automatically persisted to the filesystem!
@@ -56,9 +56,9 @@ users.insert({ name: 'John Doe', email: 'john@example.com' });
 
 ```typescript
 import { BaseDirectory } from '@tauri-apps/api/path';
-import { createTauriFilesystemAdapter } from '@pitzzahh/signaldb-adapter-tauri';
+import { createTauriFileSystemAdapter } from '@pitzzahh/signaldb-adapter-tauri';
 
-const adapter = createTauriFilesystemAdapter('app-data.json', {
+const adapter = createTauriFileSystemAdapter('app-data.json', {
   base_dir: BaseDirectory.AppConfig // Store in app config directory
 });
 ```
@@ -70,7 +70,7 @@ Protect sensitive data with custom encryption functions:
 ```typescript
 import CryptoJS from 'crypto-js';
 
-const adapter = createTauriFilesystemAdapter('secure-data.json', {
+const adapter = createTauriFileSystemAdapter('secure-data.json', {
   encrypt: async (data) => {
     const encrypted = CryptoJS.AES.encrypt(
       JSON.stringify(data), 
@@ -91,7 +91,7 @@ const adapter = createTauriFilesystemAdapter('secure-data.json', {
 ### Simple Base64 Encoding (for demo purposes)
 
 ```typescript
-const adapter = createTauriFilesystemAdapter('data.json', {
+const adapter = createTauriFileSystemAdapter('data.json', {
   encrypt: async (data) => btoa(JSON.stringify(data)),
   decrypt: async (encoded) => JSON.parse(atob(encoded))
 });
@@ -137,7 +137,7 @@ Here's a comprehensive example showing how to build a todo app with encrypted pe
 
 ```typescript
 import { Collection } from '@signaldb/core';
-import { createTauriFilesystemAdapter } from '@pitzzahh/signaldb-adapter-tauri';
+import { createTauriFileSystemAdapter } from '@pitzzahh/signaldb-adapter-tauri';
 import { BaseDirectory } from '@tauri-apps/api/path';
 import CryptoJS from 'crypto-js';
 
@@ -149,7 +149,7 @@ interface Todo {
 }
 
 // Create encrypted persistence adapter
-const todosAdapter = createTauriFilesystemAdapter('todos.json', {
+const todosAdapter = createTauriFileSystemAdapter('todos.json', {
   base_dir: BaseDirectory.AppLocalData,
   encrypt: async (data) => {
     return CryptoJS.AES.encrypt(
@@ -221,9 +221,6 @@ The adapter includes comprehensive error handling:
 ```bash
 # Run the test suite
 bun test
-
-# Run with coverage
-bun test --coverage
 ```
 
 ## 🤝 Contributing
