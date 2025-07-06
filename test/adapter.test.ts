@@ -52,12 +52,20 @@ const mockOpen = mock(async (filename: string, options: { write?: boolean; creat
   };
 });
 
+const mockRemove = mock(async (filename: string, options?: { baseDir?: BaseDirectory }): Promise<void> => {
+  const baseDir = options?.baseDir || BaseDirectory.AppLocalData;
+  const fullPath = `${baseDir}/${filename}`;
+  console.log({ fullPath })
+  mockFileSystem.delete(fullPath);
+});
+
 // Mock the entire @tauri-apps/plugin-fs module
 mock.module('@tauri-apps/plugin-fs', () => ({
   exists: mockExists,
   readFile: mockReadFile,
   writeFile: mockWriteFile,
   open: mockOpen,
+  remove: mockRemove,
   BaseDirectory: {
     AppLocalData: 'AppLocalData',
     AppConfig: 'AppConfig',
@@ -86,6 +94,7 @@ beforeEach(() => {
   mockReadFile.mockClear();
   mockWriteFile.mockClear();
   mockOpen.mockClear();
+  mockRemove.mockClear();
 });
 
 test('Basic adapter functionality', () => {
@@ -349,4 +358,75 @@ test('Mock filesystem state inspection', async () => {
 
   expect(state['AppLocalData/app1.json']).toBe('[{"id":"1","name":"App1 Data","value":1}]');
   expect(state['AppConfig/app2.json']).toBe('[{"id":"2","name":"App2 Data","value":2}]');
+});
+
+test('Change callback is called on save', async () => {
+  const adapter = createTauriFilesystemAdapter<TestData>('callback-test.json');
+  if (!adapter) return;
+
+  let callbackData: any = null;
+  const onChange = mock((data?: any) => {
+    callbackData = data;
+  });
+
+  await adapter.register(onChange);
+
+  const testData: TestData[] = [
+    { id: '1', name: 'Callback Test', value: 42 }
+  ];
+
+  await adapter.save(testData, { added: testData, modified: [], removed: [] });
+
+  // Verify the callback was called with the saved data
+  expect(onChange).toHaveBeenCalled();
+  expect(callbackData).toEqual({ items: testData });
+});
+
+test('Unregister cleans up properly', async () => {
+  const adapter = createTauriFilesystemAdapter<TestData>('unregister-test.json');
+  if (!adapter) return;
+
+  let callbackCalled = false;
+  const onChange = mock(() => {
+    callbackCalled = true;
+  });
+
+  await adapter.register(onChange);
+
+  // Verify adapter has unregister method
+  expect(adapter).toHaveProperty('unregister');
+  expect(typeof adapter.unregister).toBe('function');
+
+  await adapter.unregister?.();
+
+  const testData: TestData[] = [
+    { id: '1', name: 'After Unregister', value: 99 }
+  ];
+
+  // Save after unregister - callback should not be called
+  await adapter.save(testData, { added: testData, modified: [], removed: [] });
+
+  expect(callbackCalled).toBe(false);
+});
+
+test('Initial data callback on register', async () => {
+  // Pre-populate the mock filesystem with existing data
+  const existingData = '[{"id": "1", "name": "existing", "value": 123}]';
+  mockFileSystem.set('AppLocalData/initial-callback-test.json', new TextEncoder().encode(existingData));
+
+  const adapter = createTauriFilesystemAdapter<TestData>('initial-callback-test.json');
+  if (!adapter) return;
+
+  let callbackData: any = null;
+  const onChange = mock((data?: any) => {
+    callbackData = data;
+  });
+
+  await adapter.register(onChange);
+
+  // Verify the callback was called with initial data
+  expect(onChange).toHaveBeenCalled();
+  expect(callbackData).toEqual({
+    items: [{ id: "1", name: "existing", value: 123 }]
+  });
 });
