@@ -44,7 +44,7 @@ mock.module('@tauri-apps/plugin-fs', () => ({
 }));
 
 // Now import our adapter after mocking
-import { createTauriFileSystemAdapter } from '../src/index';
+const { createTauriFileSystemAdapter } = await import('../src/index');
 
 // Utility function for formatted table output
 function formatPerformanceTable(title: string, data: Array<{ label: string; value: string | number; unit?: string }>) {
@@ -430,6 +430,13 @@ class NestedPerformanceTester {
   }
 }
 
+// Configurable dataset sizes
+const DATASET_SIZES = {
+  SMALL: 100,
+  MEDIUM: 500,
+  LARGE: 1000
+} as const;
+
 describe('Performance Tests', () => {
   let tester: PerformanceTester;
   let encryptedTester: PerformanceTester;
@@ -474,11 +481,11 @@ describe('Performance Tests', () => {
     console.warn = originalConsoleWarn;
   });
 
-  test('Insert performance - small dataset (100 items)', async () => {
-    const itemCount = 100;
+  test('Insert performance - small dataset', async () => {
+    const itemCount = DATASET_SIZES.SMALL;
     const insertTime = await tester.testInsertPerformance(itemCount);
 
-    formatPerformanceTable('Insert Performance - Small Dataset', [
+    formatPerformanceTable(`Insert Performance - Small Dataset (${itemCount} items)`, [
       { label: 'Items processed', value: itemCount },
       { label: 'Total time', value: insertTime, unit: 'ms' },
       { label: 'Average per insert', value: insertTime / itemCount, unit: 'ms' },
@@ -486,14 +493,14 @@ describe('Performance Tests', () => {
     ]);
 
     // Performance assertion - should complete within reasonable time
-    expect(insertTime).toBeLessThan(5000); // 5 seconds max for 100 items
+    expect(insertTime).toBeLessThan(5000); // 5 seconds max for small dataset
   });
 
-  test('Insert performance - medium dataset (100 items)', async () => {
-    const itemCount = 100;
+  test('Insert performance - medium dataset', async () => {
+    const itemCount = DATASET_SIZES.MEDIUM;
     const insertTime = await tester.testInsertPerformance(itemCount);
 
-    formatPerformanceTable('Insert Performance - Medium Dataset', [
+    formatPerformanceTable(`Insert Performance - Medium Dataset (${itemCount} items)`, [
       { label: 'Items processed', value: itemCount },
       { label: 'Total time', value: insertTime, unit: 'ms' },
       { label: 'Average per insert', value: insertTime / itemCount, unit: 'ms' },
@@ -501,12 +508,27 @@ describe('Performance Tests', () => {
     ]);
 
     // Performance assertion
-    expect(insertTime).toBeLessThan(10000); // 10 seconds max for 100 items
+    expect(insertTime).toBeLessThan(8000); // 8 seconds max for medium dataset
+  });
+
+  test('Insert performance - large dataset', async () => {
+    const itemCount = DATASET_SIZES.LARGE;
+    const insertTime = await tester.testInsertPerformance(itemCount);
+
+    formatPerformanceTable(`Insert Performance - Large Dataset (${itemCount} items)`, [
+      { label: 'Items processed', value: itemCount },
+      { label: 'Total time', value: insertTime, unit: 'ms' },
+      { label: 'Average per insert', value: insertTime / itemCount, unit: 'ms' },
+      { label: 'Throughput', value: itemCount / (insertTime / 1000), unit: 'items/sec' }
+    ]);
+
+    // Performance assertion
+    expect(insertTime).toBeLessThan(10000); // 10 seconds max for large dataset
   });
 
   test('Load performance after inserting data', async () => {
     // First insert some data
-    await tester.testInsertPerformance(50);
+    await tester.testInsertPerformance(DATASET_SIZES.MEDIUM);
 
     const { loadTime, itemCount } = await tester.testLoadPerformance();
 
@@ -517,12 +539,12 @@ describe('Performance Tests', () => {
       { label: 'Throughput', value: itemCount / (loadTime / 1000), unit: 'items/sec' }
     ]);
 
-    expect(itemCount).toBe(50);
-    expect(loadTime).toBeLessThan(2000); // 2 seconds max to load 50 items
+    expect(itemCount).toBe(DATASET_SIZES.MEDIUM);
+    expect(loadTime).toBeLessThan(2000); // 2 seconds max to load medium dataset
   });
 
   test('Update performance', async () => {
-    const itemCount = 50;
+    const itemCount = DATASET_SIZES.MEDIUM;
     const updateTime = await tester.testUpdatePerformance(itemCount);
 
     formatPerformanceTable('Update Performance', [
@@ -532,11 +554,11 @@ describe('Performance Tests', () => {
       { label: 'Throughput', value: itemCount / (updateTime / 1000), unit: 'updates/sec' }
     ]);
 
-    expect(updateTime).toBeLessThan(5000); // 5 seconds max for 50 updates
+    expect(updateTime).toBeLessThan(5000); // 5 seconds max for medium dataset updates
   });
 
   test('Delete performance', async () => {
-    const itemCount = 50;
+    const itemCount = DATASET_SIZES.MEDIUM;
     const deleteTime = await tester.testDeletePerformance(itemCount);
 
     formatPerformanceTable('Delete Performance', [
@@ -546,11 +568,11 @@ describe('Performance Tests', () => {
       { label: 'Throughput', value: itemCount / (deleteTime / 1000), unit: 'deletes/sec' }
     ]);
 
-    expect(deleteTime).toBeLessThan(5000); // 5 seconds max for 50 deletes
+    expect(deleteTime).toBeLessThan(5000); // 5 seconds max for medium dataset deletes
   });
 
   test('Query performance with various operations', async () => {
-    const itemCount = 100;
+    const itemCount = DATASET_SIZES.LARGE;
     const queryTime = await tester.testQueryPerformance(itemCount);
 
     formatPerformanceTable('Query Performance', [
@@ -564,7 +586,7 @@ describe('Performance Tests', () => {
   });
 
   test('Memory usage during bulk operations', async () => {
-    const itemCount = 100;
+    const itemCount = DATASET_SIZES.LARGE;
     const memoryStats = await tester.testMemoryUsage(itemCount);
 
     formatPerformanceTable('Memory Usage Analysis', [
@@ -580,7 +602,7 @@ describe('Performance Tests', () => {
   });
 
   test('Encrypted vs unencrypted performance comparison', async () => {
-    const itemCount = 50;
+    const itemCount = DATASET_SIZES.MEDIUM;
 
     const unencryptedTime = await tester.testInsertPerformance(itemCount);
     const encryptedTime = await encryptedTester.testInsertPerformance(itemCount);
@@ -600,7 +622,7 @@ describe('Performance Tests', () => {
   });
 
   test('Performance degradation with dataset size', async () => {
-    const sizes = [25, 50, 100];
+    const sizes = [DATASET_SIZES.SMALL, DATASET_SIZES.MEDIUM, DATASET_SIZES.LARGE];
     const results: Array<{ size: number; time: number; avgTime: number; throughput: number }> = [];
 
     for (const size of sizes) {
@@ -627,40 +649,9 @@ describe('Performance Tests', () => {
     expect(lastAvg).toBeLessThan(firstAvg * 10); // Max 10x degradation
   });
 
-  // Medium dataset tests
-  test('Medium dataset performance - 75 items', async () => {
-    const itemCount = 75;
-    const insertTime = await tester.testInsertPerformance(itemCount);
-
-    formatPerformanceTable('Medium Dataset Performance (75 items)', [
-      { label: 'Items processed', value: itemCount },
-      { label: 'Total time', value: insertTime, unit: 'ms' },
-      { label: 'Average per insert', value: insertTime / itemCount, unit: 'ms' },
-      { label: 'Throughput', value: itemCount / (insertTime / 1000), unit: 'items/sec' }
-    ]);
-
-    // Performance assertion - should complete within reasonable time
-    expect(insertTime).toBeLessThan(8000); // 8 seconds max for 75 items
-  });
-
-  test('Large dataset performance - 100 items', async () => {
-    const itemCount = 100;
-    const insertTime = await tester.testInsertPerformance(itemCount);
-
-    formatPerformanceTable('Large Dataset Performance (100 items)', [
-      { label: 'Items processed', value: itemCount },
-      { label: 'Total time', value: insertTime, unit: 'ms' },
-      { label: 'Average per insert', value: insertTime / itemCount, unit: 'ms' },
-      { label: 'Throughput', value: itemCount / (insertTime / 1000), unit: 'items/sec' }
-    ]);
-
-    // Performance assertion - should complete within reasonable time
-    expect(insertTime).toBeLessThan(10000); // 10 seconds max for 100 items
-  });
-
-  test('Large dataset load performance - 100 items', async () => {
+  test('Large dataset load performance', async () => {
     // First insert the data
-    await tester.testInsertPerformance(100);
+    await tester.testInsertPerformance(DATASET_SIZES.LARGE);
 
     const { loadTime, itemCount } = await tester.testLoadPerformance();
 
@@ -671,41 +662,55 @@ describe('Performance Tests', () => {
       { label: 'Throughput', value: itemCount / (loadTime / 1000), unit: 'items/sec' }
     ]);
 
-    expect(itemCount).toBe(100);
-    expect(loadTime).toBeLessThan(3000); // 3 seconds max to load 100 items
+    expect(itemCount).toBe(DATASET_SIZES.LARGE);
+    expect(loadTime).toBeLessThan(3000); // 3 seconds max to load large dataset
   });
 
   // Nested data structure tests
-  test('Nested data structure performance - 50 items', async () => {
-    const itemCount = 50;
+  test('Nested data structure performance - small dataset', async () => {
+    const itemCount = DATASET_SIZES.SMALL;
     const insertTime = await nestedTester.testNestedInsertPerformance(itemCount);
 
-    formatPerformanceTable('Nested Data Performance (50 items)', [
+    formatPerformanceTable(`Nested Data Performance - Small (${itemCount} items)`, [
       { label: 'Items processed', value: itemCount },
       { label: 'Total time', value: insertTime, unit: 'ms' },
       { label: 'Average per insert', value: insertTime / itemCount, unit: 'ms' },
       { label: 'Throughput', value: itemCount / (insertTime / 1000), unit: 'items/sec' }
     ]);
 
-    expect(insertTime).toBeLessThan(15000); // 15 seconds max for 50 nested items
+    expect(insertTime).toBeLessThan(8000); // 8 seconds max for small nested dataset
   });
 
-  test('Nested data structure performance - 100 items', async () => {
-    const itemCount = 100;
+  test('Nested data structure performance - medium dataset', async () => {
+    const itemCount = DATASET_SIZES.MEDIUM;
     const insertTime = await nestedTester.testNestedInsertPerformance(itemCount);
 
-    formatPerformanceTable('Nested Data Performance (100 items)', [
+    formatPerformanceTable(`Nested Data Performance - Medium (${itemCount} items)`, [
       { label: 'Items processed', value: itemCount },
       { label: 'Total time', value: insertTime, unit: 'ms' },
       { label: 'Average per insert', value: insertTime / itemCount, unit: 'ms' },
       { label: 'Throughput', value: itemCount / (insertTime / 1000), unit: 'items/sec' }
     ]);
 
-    expect(insertTime).toBeLessThan(30000); // 30 seconds max for 100 nested items
+    expect(insertTime).toBeLessThan(15000); // 15 seconds max for medium nested dataset
+  });
+
+  test('Nested data structure performance - large dataset', async () => {
+    const itemCount = DATASET_SIZES.LARGE;
+    const insertTime = await nestedTester.testNestedInsertPerformance(itemCount);
+
+    formatPerformanceTable(`Nested Data Performance - Large (${itemCount} items)`, [
+      { label: 'Items processed', value: itemCount },
+      { label: 'Total time', value: insertTime, unit: 'ms' },
+      { label: 'Average per insert', value: insertTime / itemCount, unit: 'ms' },
+      { label: 'Throughput', value: itemCount / (insertTime / 1000), unit: 'items/sec' }
+    ]);
+
+    expect(insertTime).toBeLessThan(30000); // 30 seconds max for large nested dataset
   });
 
   test('Nested data query performance', async () => {
-    const itemCount = 50;
+    const itemCount = DATASET_SIZES.MEDIUM;
     const queryTime = await nestedTester.testNestedQueryPerformance(itemCount);
 
     formatPerformanceTable('Nested Data Query Performance', [
@@ -719,7 +724,7 @@ describe('Performance Tests', () => {
   });
 
   test('Nested data update performance', async () => {
-    const itemCount = 50;
+    const itemCount = DATASET_SIZES.MEDIUM;
     const updateTime = await nestedTester.testNestedUpdatePerformance(itemCount);
 
     formatPerformanceTable('Nested Data Update Performance', [
@@ -742,7 +747,7 @@ describe('Performance Tests', () => {
 
     const beforeMB = getMemoryUsage();
 
-    const itemCount = 75;
+    const itemCount = DATASET_SIZES.MEDIUM;
     await nestedTester.testNestedInsertPerformance(itemCount);
 
     const afterMB = getMemoryUsage();
@@ -761,7 +766,7 @@ describe('Performance Tests', () => {
   });
 
   test('Scaling comparison: simple vs nested data', async () => {
-    const itemCount = 50;
+    const itemCount = DATASET_SIZES.MEDIUM;
 
     // Temporarily suppress warnings for this comparison test
     const tempWarn = console.warn;
@@ -800,7 +805,7 @@ describe('Performance Tests', () => {
   });
 
   test('Scaling test with performance tracking', async () => {
-    const sizes = [25, 50, 75, 100];
+    const sizes = [DATASET_SIZES.SMALL, DATASET_SIZES.MEDIUM, DATASET_SIZES.LARGE];
     const results: Array<{ size: number; time: number; avgTime: number; throughput: number }> = [];
 
     // Temporarily suppress warnings for scaling test
