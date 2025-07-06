@@ -34,7 +34,7 @@ import { DecryptFunction, EncryptFunction } from './types';
  * @returns {PersistenceAdapter<T, ID>} A configured persistence adapter instance
  * @throws {Error} If there is an error during file operations
  */
-export function createTauriFilesystemAdapter<T extends { id: ID } & Record<string, any>, ID = string>(
+export function createTauriFileSystemAdapter<T extends { id: ID } & Record<string, any>, ID = string>(
   filename: string,
   options?: {
     base_dir?: BaseDirectory;
