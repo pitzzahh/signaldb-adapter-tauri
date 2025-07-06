@@ -48,32 +48,76 @@ const { createTauriFileSystemAdapter } = await import('../src/index');
 
 // Utility function for formatted table output
 function formatPerformanceTable(title: string, data: Array<{ label: string; value: string | number; unit?: string }>) {
-  console.log(`\n┌─ ${title} ─${'─'.repeat(Math.max(50 - title.length, 0))}┐`);
+  const LABEL_WIDTH = 32;
+  const VALUE_WIDTH = 22;
+
+  // First, let's build a sample row to measure the actual width
+  const sampleRow = `│ ${'Items processed'.padEnd(LABEL_WIDTH)} │ ${'100.00'.padStart(VALUE_WIDTH)} │`;
+  const ACTUAL_TABLE_WIDTH = sampleRow.length;
+
+  // Calculate title padding for centering
+  const titleLength = title.length;
+  const availableSpace = ACTUAL_TABLE_WIDTH - 4; // 4 for "┌─" and "─┐"
+  const titlePadding = Math.max(0, availableSpace - titleLength);
+  const leftPadding = Math.floor(titlePadding / 2);
+  const rightPadding = titlePadding - leftPadding;
+
+  // Top border with centered title - ensure exact width match
+  const titleBar = `┌─${' '.repeat(leftPadding)}${title}${' '.repeat(rightPadding)}─┐`;
+  console.log(`\n${titleBar}`);
+
+  // Header separator
+  console.log(`├${'─'.repeat(LABEL_WIDTH + 2)}┼${'─'.repeat(VALUE_WIDTH + 2)}┤`);
 
   data.forEach(({ label, value, unit = '' }) => {
-    const labelPadded = label.padEnd(25);
+    const labelPadded = label.padEnd(LABEL_WIDTH);
     const valueStr = typeof value === 'number' ? value.toFixed(2) : value.toString();
     const valueWithUnit = unit ? `${valueStr} ${unit}` : valueStr;
-    console.log(`│ ${labelPadded} │ ${valueWithUnit.padStart(20)} │`);
+    const valuePadded = valueWithUnit.padStart(VALUE_WIDTH);
+    console.log(`│ ${labelPadded} │ ${valuePadded} │`);
   });
 
-  console.log(`└${'─'.repeat(53)}┘`);
+  // Bottom border
+  console.log(`└${'─'.repeat(LABEL_WIDTH + 2)}┴${'─'.repeat(VALUE_WIDTH + 2)}┘`);
 }
 
 function formatScalingTable(title: string, results: Array<{ size: number; time: number; avgTime: number; throughput?: number }>) {
-  console.log(`\n┌─ ${title} ─${'─'.repeat(Math.max(70 - title.length, 0))}┐`);
-  console.log('│ Size │    Total (ms) │   Avg (ms)   │ Throughput (items/sec) │');
-  console.log('├──────┼───────────────┼──────────────┼────────────────────────┤');
+  const SIZE_WIDTH = 6;
+  const TIME_WIDTH = 12;
+  const AVG_WIDTH = 12;
+  const THROUGHPUT_WIDTH = 22;
+
+  // First, let's build a sample row to measure the actual width
+  const sampleRow = `│${'Size'.padStart(SIZE_WIDTH + 1)}│${'Total (ms)'.padStart(TIME_WIDTH + 1)}│${'Avg (ms)'.padStart(AVG_WIDTH + 1)}│${'Throughput (items/sec)'.padStart(THROUGHPUT_WIDTH + 1)}│`;
+  const ACTUAL_TABLE_WIDTH = sampleRow.length;
+
+  // Calculate title padding for centering
+  const titleLength = title.length;
+  const availableSpace = ACTUAL_TABLE_WIDTH - 4; // 4 for "┌─" and "─┐"
+  const titlePadding = Math.max(0, availableSpace - titleLength);
+  const leftPadding = Math.floor(titlePadding / 2);
+  const rightPadding = titlePadding - leftPadding;
+
+  // Top border with centered title - ensure exact width match
+  const titleBar = `┌─${' '.repeat(leftPadding)}${title}${' '.repeat(rightPadding)}─┐`;
+  console.log(`\n${titleBar}`);
+
+  // Headers with proper spacing
+  console.log(`│${'Size'.padStart(SIZE_WIDTH + 1)}│${'Total (ms)'.padStart(TIME_WIDTH + 1)}│${'Avg (ms)'.padStart(AVG_WIDTH + 1)}│${'Throughput (items/sec)'.padStart(THROUGHPUT_WIDTH + 1)}│`);
+
+  // Header separator
+  console.log(`├${'─'.repeat(SIZE_WIDTH + 1)}┼${'─'.repeat(TIME_WIDTH + 1)}┼${'─'.repeat(AVG_WIDTH + 1)}┼${'─'.repeat(THROUGHPUT_WIDTH + 1)}┤`);
 
   results.forEach(result => {
-    const size = result.size.toString().padStart(4);
-    const total = result.time.toFixed(0).padStart(11);
-    const avg = result.avgTime.toFixed(3).padStart(10);
-    const throughput = result.throughput ? result.throughput.toFixed(1).padStart(18) : 'N/A'.padStart(18);
-    console.log(`│ ${size} │ ${total} │ ${avg} │ ${throughput} │`);
+    const size = result.size.toString().padStart(SIZE_WIDTH + 1);
+    const total = result.time.toFixed(0).padStart(TIME_WIDTH + 1);
+    const avg = result.avgTime.toFixed(3).padStart(AVG_WIDTH + 1);
+    const throughput = result.throughput ? result.throughput.toFixed(1).padStart(THROUGHPUT_WIDTH + 1) : 'N/A'.padStart(THROUGHPUT_WIDTH + 1);
+    console.log(`│${size}│${total}│${avg}│${throughput}│`);
   });
 
-  console.log(`└${'─'.repeat(73)}┘`);
+  // Bottom border
+  console.log(`└${'─'.repeat(SIZE_WIDTH + 1)}┴${'─'.repeat(TIME_WIDTH + 1)}┴${'─'.repeat(AVG_WIDTH + 1)}┴${'─'.repeat(THROUGHPUT_WIDTH + 1)}┘`);
 }
 
 interface TestData {
