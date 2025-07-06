@@ -1,4 +1,4 @@
-# @pitzzahh/signaldb-tauri-fs
+# @pitzzahh/signaldb-adapter-tauri
 
 [![npm version](https://badge.fury.io/js/@pitzzahh%2Fsignaldb-adapter-tauri.svg?icon=si%3Anpm)](https://badge.fury.io/js/@pitzzahh%2Fsignaldb-adapter-tauri)
 [![Test](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml/badge.svg)](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml)
@@ -22,16 +22,16 @@ Install the package using your preferred package manager:
 
 ```bash
 # npm
-npm install @pitzzahh/signaldb-tauri-fs
+npm install @pitzzahh/signaldb-adapter-tauri
 
 # yarn
-yarn add @pitzzahh/signaldb-tauri-fs
+yarn add @pitzzahh/signaldb-adapter-tauri
 
 # pnpm
-pnpm add @pitzzahh/signaldb-tauri-fs
+pnpm add @pitzzahh/signaldb-adapter-tauri
 
 # bun
-bun add @pitzzahh/signaldb-tauri-fs
+bun add @pitzzahh/signaldb-adapter-tauri
 ```
 
 ## 🚀 Quick Start
@@ -40,7 +40,7 @@ bun add @pitzzahh/signaldb-tauri-fs
 
 ```typescript
 import { Collection } from '@signaldb/core';
-import { createTauriFilesystemAdapter } from '@pitzzahh/signaldb-tauri-fs';
+import { createTauriFilesystemAdapter } from '@pitzzahh/signaldb-adapter-tauri';
 
 // Create a collection with filesystem persistence
 const users = new Collection({
@@ -56,7 +56,7 @@ users.insert({ name: 'John Doe', email: 'john@example.com' });
 
 ```typescript
 import { BaseDirectory } from '@tauri-apps/api/path';
-import { createTauriFilesystemAdapter } from '@pitzzahh/signaldb-tauri-fs';
+import { createTauriFilesystemAdapter } from '@pitzzahh/signaldb-adapter-tauri';
 
 const adapter = createTauriFilesystemAdapter('app-data.json', {
   base_dir: BaseDirectory.AppConfig // Store in app config directory
@@ -137,7 +137,7 @@ Here's a comprehensive example showing how to build a todo app with encrypted pe
 
 ```typescript
 import { Collection } from '@signaldb/core';
-import { createTauriFilesystemAdapter } from '@pitzzahh/signaldb-tauri-fs';
+import { createTauriFilesystemAdapter } from '@pitzzahh/signaldb-adapter-tauri';
 import { BaseDirectory } from '@tauri-apps/api/path';
 import CryptoJS from 'crypto-js';
 
