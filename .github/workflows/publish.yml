@@ -10,10 +10,12 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      # Setup .npmrc file to publish to npm
+      - uses: actions/setup-node@v4
         with:
+          node-version: '20.x'
           registry-url: 'https://registry.npmjs.org'
-      - run: bun install
-      - run: bun publish --access=public
+      - run: npm ci
+      - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
