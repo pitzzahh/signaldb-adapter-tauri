@@ -99,7 +99,7 @@ const adapter = createTauriFileSystemAdapter('data.json', {
 
 ## 📋 API Reference
 
-### `createTauriFilesystemAdapter(filename, options?)`
+### `createTauriFileSystemAdapter(filename, options?)`
 
 Creates a new persistence adapter instance.
 
