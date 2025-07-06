@@ -1,5 +1,5 @@
 {
-  "name": "@pitzzahh/signaldb-tauri-fs",
+  "name": "@pitzzahh/signaldb-adapter-tauri",
   "version": "1.0.0",
   "description": "A SignalDB persistence adapter for Tauri apps with optional encryption support",
   "module": "dist/index.js",
@@ -13,11 +13,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pitzzahh/signaldb-tauri-fs.git"
+    "url": "git+https://github.com/pitzzahh/signaldb-adapter-tauri.git"
   },
-  "homepage": "https://github.com/pitzzahh/signaldb-tauri-fs#readme",
+  "homepage": "https://github.com/pitzzahh/signaldb-adapter-tauri#readme",
   "bugs": {
-    "url": "https://github.com/pitzzahh/signaldb-tauri-fs/issues"
+    "url": "https://github.com/pitzzahh/signaldb-adapter-tauri/issues"
   },
   "keywords": [
     "signaldb",
