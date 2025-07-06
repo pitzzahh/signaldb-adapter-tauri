@@ -9,42 +9,42 @@ interface TestData {
 }
 
 // Mock filesystem state - this simulates the actual file system
-const mockFileSystem = new Map<string, Uint8Array>();
+const mock_file_system = new Map<string, Uint8Array>();
 
 // Mock functions for the Tauri filesystem plugin
-const mockExists = mock(async (filename: string, options?: { baseDir?: BaseDirectory }): Promise<boolean> => {
-  const baseDir = options?.baseDir || BaseDirectory.AppLocalData;
-  const fullPath = `${baseDir}/${filename}`;
-  return mockFileSystem.has(fullPath);
+const mock_exists = mock(async (filename: string, options?: { baseDir?: BaseDirectory }): Promise<boolean> => {
+  const base_dir = options?.baseDir || BaseDirectory.AppLocalData;
+  const full_path = `${base_dir}/${filename}`;
+  return mock_file_system.has(full_path);
 });
 
-const mockReadFile = mock(async (filename: string, options?: { baseDir?: BaseDirectory }): Promise<Uint8Array> => {
-  const baseDir = options?.baseDir || BaseDirectory.AppLocalData;
-  const fullPath = `${baseDir}/${filename}`;
-  const content = mockFileSystem.get(fullPath);
+const mock_read_file = mock(async (filename: string, options?: { baseDir?: BaseDirectory }): Promise<Uint8Array> => {
+  const base_dir = options?.baseDir || BaseDirectory.AppLocalData;
+  const full_path = `${base_dir}/${filename}`;
+  const content = mock_file_system.get(full_path);
   if (!content) {
     throw new Error(`File not found: ${filename}`);
   }
   return content;
 });
 
-const mockWriteFile = mock(async (filename: string, data: Uint8Array, options?: { baseDir?: BaseDirectory }): Promise<void> => {
-  const baseDir = options?.baseDir || BaseDirectory.AppLocalData;
-  const fullPath = `${baseDir}/${filename}`;
-  mockFileSystem.set(fullPath, data);
+const mock_write_file = mock(async (filename: string, data: Uint8Array, options?: { baseDir?: BaseDirectory }): Promise<void> => {
+  const base_dir = options?.baseDir || BaseDirectory.AppLocalData;
+  const full_path = `${base_dir}/${filename}`;
+  mock_file_system.set(full_path, data);
 });
 
-const mockOpen = mock(async (filename: string, options: { write?: boolean; create?: boolean; baseDir?: BaseDirectory }) => {
-  const baseDir = options.baseDir || BaseDirectory.AppLocalData;
-  const fullPath = `${baseDir}/${filename}`;
+const mock_open = mock(async (filename: string, options: { write?: boolean; create?: boolean; baseDir?: BaseDirectory }) => {
+  const base_dir = options.baseDir || BaseDirectory.AppLocalData;
+  const full_path = `${base_dir}/${filename}`;
 
   return {
     write: mock(async (data: Uint8Array) => {
-      mockFileSystem.set(fullPath, data);
+      mock_file_system.set(full_path, data);
     }),
     truncate: mock(async () => {
       // Mock truncate - clear the file
-      mockFileSystem.set(fullPath, new Uint8Array(0));
+      mock_file_system.set(full_path, new Uint8Array(0));
     }),
     close: mock(async () => {
       // Mock close - no-op
@@ -52,20 +52,20 @@ const mockOpen = mock(async (filename: string, options: { write?: boolean; creat
   };
 });
 
-const mockRemove = mock(async (filename: string, options?: { baseDir?: BaseDirectory }): Promise<void> => {
-  const baseDir = options?.baseDir || BaseDirectory.AppLocalData;
-  const fullPath = `${baseDir}/${filename}`;
-  console.log({ fullPath })
-  mockFileSystem.delete(fullPath);
+const mock_remove = mock(async (filename: string, options?: { baseDir?: BaseDirectory }): Promise<void> => {
+  const base_dir = options?.baseDir || BaseDirectory.AppLocalData;
+  const full_path = `${base_dir}/${filename}`;
+  console.log({ full_path })
+  mock_file_system.delete(full_path);
 });
 
 // Mock the entire @tauri-apps/plugin-fs module
 mock.module('@tauri-apps/plugin-fs', () => ({
-  exists: mockExists,
-  readFile: mockReadFile,
-  writeFile: mockWriteFile,
-  open: mockOpen,
-  remove: mockRemove,
+  exists: mock_exists,
+  readFile: mock_read_file,
+  writeFile: mock_write_file,
+  open: mock_open,
+  remove: mock_remove,
   BaseDirectory: {
     AppLocalData: 'AppLocalData',
     AppConfig: 'AppConfig',
@@ -89,12 +89,12 @@ const { createTauriFilesystemAdapter } = await import('../src/index');
 
 beforeEach(() => {
   // Clear the mock filesystem and reset mock calls before each test
-  mockFileSystem.clear();
-  mockExists.mockClear();
-  mockReadFile.mockClear();
-  mockWriteFile.mockClear();
-  mockOpen.mockClear();
-  mockRemove.mockClear();
+  mock_file_system.clear();
+  mock_exists.mockClear();
+  mock_read_file.mockClear();
+  mock_write_file.mockClear();
+  mock_open.mockClear();
+  mock_remove.mockClear();
 });
 
 test('Basic adapter functionality', () => {
@@ -117,20 +117,20 @@ test('Register creates initial empty file in AppLocalData', async () => {
   if (!adapter) return;
 
   // Before register, file should not exist
-  expect(mockFileSystem.has('AppLocalData/test.json')).toBe(false);
+  expect(mock_file_system.has('AppLocalData/test.json')).toBe(false);
 
   await adapter.register(() => { });
 
   // After register, file should exist with empty array
-  expect(mockFileSystem.has('AppLocalData/test.json')).toBe(true);
+  expect(mock_file_system.has('AppLocalData/test.json')).toBe(true);
 
-  const fileContent = mockFileSystem.get('AppLocalData/test.json')!;
-  const contentString = new TextDecoder().decode(fileContent);
-  expect(contentString).toBe('[]');
+  const file_content = mock_file_system.get('AppLocalData/test.json')!;
+  const content_string = new TextDecoder().decode(file_content);
+  expect(content_string).toBe('[]');
 
   // Verify the correct Tauri functions were called
-  expect(mockExists).toHaveBeenCalledWith('test.json', { baseDir: 'AppLocalData' });
-  expect(mockWriteFile).toHaveBeenCalled();
+  expect(mock_exists).toHaveBeenCalledWith('test.json', { baseDir: 'AppLocalData' });
+  expect(mock_write_file).toHaveBeenCalled();
 });
 
 test('Register does not overwrite existing file', async () => {
@@ -138,47 +138,47 @@ test('Register does not overwrite existing file', async () => {
   if (!adapter) return;
 
   // Pre-populate the mock filesystem with existing data
-  const existingData = '[{"id": "1", "name": "existing"}]';
-  mockFileSystem.set('AppLocalData/test.json', new TextEncoder().encode(existingData));
+  const existing_data = '[{"id": "1", "name": "existing"}]';
+  mock_file_system.set('AppLocalData/test.json', new TextEncoder().encode(existing_data));
 
   await adapter.register(() => { });
 
   // File should remain unchanged
-  const fileContent = mockFileSystem.get('AppLocalData/test.json')!;
-  const contentString = new TextDecoder().decode(fileContent);
-  expect(contentString).toBe(existingData);
+  const file_content = mock_file_system.get('AppLocalData/test.json')!;
+  const content_string = new TextDecoder().decode(file_content);
+  expect(content_string).toBe(existing_data);
 
   // Verify exists was called but writeFile was not called
-  expect(mockExists).toHaveBeenCalledWith('test.json', { baseDir: 'AppLocalData' });
-  expect(mockWriteFile).not.toHaveBeenCalled();
+  expect(mock_exists).toHaveBeenCalledWith('test.json', { baseDir: 'AppLocalData' });
+  expect(mock_write_file).not.toHaveBeenCalled();
 });
 
 test('Save and load data correctly', async () => {
   const adapter = createTauriFilesystemAdapter<TestData>('users.json');
   if (!adapter) return;
 
-  const testData: TestData[] = [
+  const test_data: TestData[] = [
     { id: '1', name: 'John Doe', value: 100 },
     { id: '2', name: 'Jane Smith', value: 200 },
   ];
 
   await adapter.register(() => { });
-  await adapter.save(testData, { added: testData, modified: [], removed: [] });
+  await adapter.save(test_data, { added: test_data, modified: [], removed: [] });
 
   // Check that data was actually written to the mock filesystem
-  expect(mockFileSystem.has('AppLocalData/users.json')).toBe(true);
+  expect(mock_file_system.has('AppLocalData/users.json')).toBe(true);
 
-  const fileContent = mockFileSystem.get('AppLocalData/users.json')!;
-  const contentString = new TextDecoder().decode(fileContent);
-  expect(contentString).toBe(JSON.stringify(testData));
+  const file_content = mock_file_system.get('AppLocalData/users.json')!;
+  const content_string = new TextDecoder().decode(file_content);
+  expect(content_string).toBe(JSON.stringify(test_data));
 
   // Load and verify the data comes back correctly
-  const loadResult = await adapter.load();
-  expect(loadResult.items).toEqual(testData);
+  const load_result = await adapter.load();
+  expect(load_result.items).toEqual(test_data);
 
   // Verify the correct Tauri functions were called
-  expect(mockOpen).toHaveBeenCalled();
-  expect(mockReadFile).toHaveBeenCalledWith('users.json', { baseDir: 'AppLocalData' });
+  expect(mock_open).toHaveBeenCalled();
+  expect(mock_read_file).toHaveBeenCalledWith('users.json', { baseDir: 'AppLocalData' });
 });
 
 test('Uses custom base directory', async () => {
@@ -190,15 +190,15 @@ test('Uses custom base directory', async () => {
   await adapter.register(() => { });
 
   // Check that file was created in AppConfig directory
-  expect(mockFileSystem.has('AppConfig/config.json')).toBe(true);
-  expect(mockFileSystem.has('AppLocalData/config.json')).toBe(false);
+  expect(mock_file_system.has('AppConfig/config.json')).toBe(true);
+  expect(mock_file_system.has('AppLocalData/config.json')).toBe(false);
 
-  const fileContent = mockFileSystem.get('AppConfig/config.json')!;
-  const contentString = new TextDecoder().decode(fileContent);
-  expect(contentString).toBe('[]');
+  const file_content = mock_file_system.get('AppConfig/config.json')!;
+  const content_string = new TextDecoder().decode(file_content);
+  expect(content_string).toBe('[]');
 
   // Verify the correct base directory was used
-  expect(mockExists).toHaveBeenCalledWith('config.json', { baseDir: 'AppConfig' });
+  expect(mock_exists).toHaveBeenCalledWith('config.json', { baseDir: 'AppConfig' });
 });
 
 test('Load handles non-existent file', async () => {
@@ -206,13 +206,13 @@ test('Load handles non-existent file', async () => {
   if (!adapter) return;
 
   // File should not exist in filesystem
-  expect(mockFileSystem.has('AppLocalData/nonexistent.json')).toBe(false);
+  expect(mock_file_system.has('AppLocalData/nonexistent.json')).toBe(false);
 
   const result = await adapter.load();
   expect(result.items).toEqual([]);
 
   // Verify exists was called
-  expect(mockExists).toHaveBeenCalledWith('nonexistent.json', { baseDir: 'AppLocalData' });
+  expect(mock_exists).toHaveBeenCalledWith('nonexistent.json', { baseDir: 'AppLocalData' });
 });
 
 test('Load handles empty file', async () => {
@@ -220,7 +220,7 @@ test('Load handles empty file', async () => {
   if (!adapter) return;
 
   // Create empty file in mock filesystem
-  mockFileSystem.set('AppLocalData/empty.json', new TextEncoder().encode(''));
+  mock_file_system.set('AppLocalData/empty.json', new TextEncoder().encode(''));
 
   const result = await adapter.load();
   expect(result.items).toEqual([]);
@@ -231,7 +231,7 @@ test('Load handles corrupted JSON gracefully', async () => {
   if (!adapter) return;
 
   // Create file with invalid JSON in mock filesystem
-  mockFileSystem.set('AppLocalData/corrupted.json', new TextEncoder().encode('invalid json'));
+  mock_file_system.set('AppLocalData/corrupted.json', new TextEncoder().encode('invalid json'));
 
   const result = await adapter.load();
   expect(result.items).toEqual([]);
@@ -244,61 +244,61 @@ test('Encryption creates encrypted files', async () => {
   });
   if (!adapter) return;
 
-  const testData: TestData[] = [
+  const test_data: TestData[] = [
     { id: '1', name: 'Secret Data', value: 123 }
   ];
 
   await adapter.register(() => { });
 
   // Check that initial file is encrypted (base64 encoded empty array)
-  const initialContent = mockFileSystem.get('AppLocalData/encrypted.json')!;
-  const initialString = new TextDecoder().decode(initialContent);
-  expect(initialString).toBe(btoa(JSON.stringify([])));
-  expect(initialString).not.toBe('[]'); // Should be encrypted, not plain JSON
+  const initial_content = mock_file_system.get('AppLocalData/encrypted.json')!;
+  const initial_string = new TextDecoder().decode(initial_content);
+  expect(initial_string).toBe(btoa(JSON.stringify([])));
+  expect(initial_string).not.toBe('[]'); // Should be encrypted, not plain JSON
 
-  await adapter.save(testData, { added: testData, modified: [], removed: [] });
+  await adapter.save(test_data, { added: test_data, modified: [], removed: [] });
 
   // Check that saved data is encrypted
-  const savedContent = mockFileSystem.get('AppLocalData/encrypted.json')!;
-  const savedString = new TextDecoder().decode(savedContent);
-  expect(savedString).toBe(btoa(JSON.stringify(testData)));
-  expect(savedString).not.toBe(JSON.stringify(testData)); // Should be encrypted
+  const saved_content = mock_file_system.get('AppLocalData/encrypted.json')!;
+  const saved_string = new TextDecoder().decode(saved_content);
+  expect(saved_string).toBe(btoa(JSON.stringify(test_data)));
+  expect(saved_string).not.toBe(JSON.stringify(test_data)); // Should be encrypted
 
   // Verify we can still load and decrypt correctly
   const result = await adapter.load();
-  expect(result.items).toEqual(testData);
+  expect(result.items).toEqual(test_data);
 });
 
 test('Multiple adapters with different files', async () => {
-  const usersAdapter = createTauriFilesystemAdapter<TestData>('users.json');
-  const settingsAdapter = createTauriFilesystemAdapter<TestData>('settings.json');
-  if (!usersAdapter || !settingsAdapter) return;
+  const users_adapter = createTauriFilesystemAdapter<TestData>('users.json');
+  const settings_adapter = createTauriFilesystemAdapter<TestData>('settings.json');
+  if (!users_adapter || !settings_adapter) return;
 
-  const userData: TestData[] = [{ id: '1', name: 'User', value: 1 }];
-  const settingsData: TestData[] = [{ id: '1', name: 'Theme', value: 2 }];
+  const user_data: TestData[] = [{ id: '1', name: 'User', value: 1 }];
+  const settings_data: TestData[] = [{ id: '1', name: 'Theme', value: 2 }];
 
-  await usersAdapter.register(() => { });
-  await settingsAdapter.register(() => { });
+  await users_adapter.register(() => { });
+  await settings_adapter.register(() => { });
 
-  await usersAdapter.save(userData, { added: userData, modified: [], removed: [] });
-  await settingsAdapter.save(settingsData, { added: settingsData, modified: [], removed: [] });
+  await users_adapter.save(user_data, { added: user_data, modified: [], removed: [] });
+  await settings_adapter.save(settings_data, { added: settings_data, modified: [], removed: [] });
 
   // Check both files exist with correct content
-  expect(mockFileSystem.has('AppLocalData/users.json')).toBe(true);
-  expect(mockFileSystem.has('AppLocalData/settings.json')).toBe(true);
+  expect(mock_file_system.has('AppLocalData/users.json')).toBe(true);
+  expect(mock_file_system.has('AppLocalData/settings.json')).toBe(true);
 
-  const usersContent = new TextDecoder().decode(mockFileSystem.get('AppLocalData/users.json')!);
-  const settingsContent = new TextDecoder().decode(mockFileSystem.get('AppLocalData/settings.json')!);
+  const users_content = new TextDecoder().decode(mock_file_system.get('AppLocalData/users.json')!);
+  const settings_content = new TextDecoder().decode(mock_file_system.get('AppLocalData/settings.json')!);
 
-  expect(usersContent).toBe(JSON.stringify(userData));
-  expect(settingsContent).toBe(JSON.stringify(settingsData));
+  expect(users_content).toBe(JSON.stringify(user_data));
+  expect(settings_content).toBe(JSON.stringify(settings_data));
 
   // Verify loading works independently
-  const usersResult = await usersAdapter.load();
-  const settingsResult = await settingsAdapter.load();
+  const users_result = await users_adapter.load();
+  const settings_result = await settings_adapter.load();
 
-  expect(usersResult.items).toEqual(userData);
-  expect(settingsResult.items).toEqual(settingsData);
+  expect(users_result.items).toEqual(user_data);
+  expect(settings_result.items).toEqual(settings_data);
 });
 
 test('Handles save errors gracefully', async () => {
@@ -309,7 +309,7 @@ test('Handles save errors gracefully', async () => {
   });
   if (!adapter) return;
 
-  const testData: TestData[] = [{ id: '1', name: 'Test', value: 100 }];
+  const test_data: TestData[] = [{ id: '1', name: 'Test', value: 100 }];
 
   // Register will fail due to encryption error, so the file won't be created
   try {
@@ -319,16 +319,16 @@ test('Handles save errors gracefully', async () => {
   }
 
   // Should throw error on save due to encryption failure
-  await expect(adapter.save(testData, { added: testData, modified: [], removed: [] })).rejects.toThrow('Failed to save data to test.json');
+  await expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] })).rejects.toThrow('Failed to save data to test.json');
 
   // File should not exist since register failed
-  expect(mockFileSystem.has('AppLocalData/test.json')).toBe(false);
+  expect(mock_file_system.has('AppLocalData/test.json')).toBe(false);
 });
 
 // Helper function to inspect the mock filesystem state
-function getMockFileSystemState() {
+function get_mock_file_system_state() {
   const state: Record<string, string> = {};
-  for (const [path, content] of mockFileSystem.entries()) {
+  for (const [path, content] of mock_file_system.entries()) {
     state[path] = new TextDecoder().decode(content);
   }
   return state;
@@ -347,7 +347,7 @@ test('Mock filesystem state inspection', async () => {
   await adapter1.save([{ id: '1', name: 'App1 Data', value: 1 }], { added: [{ id: '1', name: 'App1 Data', value: 1 }], modified: [], removed: [] });
   await adapter2.save([{ id: '2', name: 'App2 Data', value: 2 }], { added: [{ id: '2', name: 'App2 Data', value: 2 }], modified: [], removed: [] });
 
-  const state = getMockFileSystemState();
+  const state = get_mock_file_system_state();
 
   console.log('Mock filesystem state:', state);
   console.log('Available keys:', Object.keys(state));
@@ -364,34 +364,34 @@ test('Change callback is called on save', async () => {
   const adapter = createTauriFilesystemAdapter<TestData>('callback-test.json');
   if (!adapter) return;
 
-  let callbackData: any = null;
-  const onChange = mock((data?: any) => {
-    callbackData = data;
+  let callback_data: any = null;
+  const on_change = mock((data?: any) => {
+    callback_data = data;
   });
 
-  await adapter.register(onChange);
+  await adapter.register(on_change);
 
-  const testData: TestData[] = [
+  const test_data: TestData[] = [
     { id: '1', name: 'Callback Test', value: 42 }
   ];
 
-  await adapter.save(testData, { added: testData, modified: [], removed: [] });
+  await adapter.save(test_data, { added: test_data, modified: [], removed: [] });
 
   // Verify the callback was called with the saved data
-  expect(onChange).toHaveBeenCalled();
-  expect(callbackData).toEqual({ items: testData });
+  expect(on_change).toHaveBeenCalled();
+  expect(callback_data).toEqual({ items: test_data });
 });
 
 test('Unregister cleans up properly', async () => {
   const adapter = createTauriFilesystemAdapter<TestData>('unregister-test.json');
   if (!adapter) return;
 
-  let callbackCalled = false;
-  const onChange = mock(() => {
-    callbackCalled = true;
+  let callback_called = false;
+  const on_change = mock(() => {
+    callback_called = true;
   });
 
-  await adapter.register(onChange);
+  await adapter.register(on_change);
 
   // Verify adapter has unregister method
   expect(adapter).toHaveProperty('unregister');
@@ -399,34 +399,34 @@ test('Unregister cleans up properly', async () => {
 
   await adapter.unregister?.();
 
-  const testData: TestData[] = [
+  const test_data: TestData[] = [
     { id: '1', name: 'After Unregister', value: 99 }
   ];
 
   // Save after unregister - callback should not be called
-  await adapter.save(testData, { added: testData, modified: [], removed: [] });
+  await adapter.save(test_data, { added: test_data, modified: [], removed: [] });
 
-  expect(callbackCalled).toBe(false);
+  expect(callback_called).toBe(false);
 });
 
 test('Initial data callback on register', async () => {
   // Pre-populate the mock filesystem with existing data
-  const existingData = '[{"id": "1", "name": "existing", "value": 123}]';
-  mockFileSystem.set('AppLocalData/initial-callback-test.json', new TextEncoder().encode(existingData));
+  const existing_data = '[{"id": "1", "name": "existing", "value": 123}]';
+  mock_file_system.set('AppLocalData/initial-callback-test.json', new TextEncoder().encode(existing_data));
 
   const adapter = createTauriFilesystemAdapter<TestData>('initial-callback-test.json');
   if (!adapter) return;
 
-  let callbackData: any = null;
-  const onChange = mock((data?: any) => {
-    callbackData = data;
+  let callback_data: any = null;
+  const on_change = mock((data?: any) => {
+    callback_data = data;
   });
 
-  await adapter.register(onChange);
+  await adapter.register(on_change);
 
   // Verify the callback was called with initial data
-  expect(onChange).toHaveBeenCalled();
-  expect(callbackData).toEqual({
+  expect(on_change).toHaveBeenCalled();
+  expect(callback_data).toEqual({
     items: [{ id: "1", name: "existing", value: 123 }]
   });
 });
@@ -436,18 +436,18 @@ test('Save uses incremental changes correctly', async () => {
   if (!adapter) return;
 
   // Initial data
-  const initialData: TestData[] = [
+  const initial_data: TestData[] = [
     { id: '1', name: 'Original Item 1', value: 100 },
     { id: '2', name: 'Original Item 2', value: 200 },
     { id: '3', name: 'Original Item 3', value: 300 }
   ];
 
   await adapter.register(() => { });
-  await adapter.save(initialData, { added: initialData, modified: [], removed: [] });
+  await adapter.save(initial_data, { added: initial_data, modified: [], removed: [] });
 
   // Verify initial save
   let result = await adapter.load();
-  expect(result.items).toEqual(initialData);
+  expect(result.items).toEqual(initial_data);
 
   // Now perform incremental updates
   const changes = {
@@ -456,34 +456,34 @@ test('Save uses incremental changes correctly', async () => {
     removed: [{ id: '3', name: 'Original Item 3', value: 300 }]
   };
 
-  const expectedFinalData: TestData[] = [
+  const expected_final_data: TestData[] = [
     { id: '1', name: 'Original Item 1', value: 100 },
     { id: '2', name: 'Updated Item 2', value: 250 },
     { id: '4', name: 'New Item', value: 400 }
   ];
 
-  await adapter.save(expectedFinalData, changes);
+  await adapter.save(expected_final_data, changes);
 
   // Verify incremental changes were applied correctly
   result = await adapter.load();
-  expect(result.items).toEqual(expectedFinalData);
+  expect(result.items).toEqual(expected_final_data);
 });
 
 test('Save handles empty changes gracefully', async () => {
   const adapter = createTauriFilesystemAdapter<TestData>('empty-changes-test.json');
   if (!adapter) return;
 
-  const testData: TestData[] = [
+  const test_data: TestData[] = [
     { id: '1', name: 'Test Item', value: 100 }
   ];
 
   await adapter.register(() => { });
 
   // Save with empty changes
-  await adapter.save(testData, { added: [], modified: [], removed: [] });
+  await adapter.save(test_data, { added: [], modified: [], removed: [] });
 
   const result = await adapter.load();
-  expect(result.items).toEqual(testData);
+  expect(result.items).toEqual(test_data);
 });
 
 test('Save falls back to full save on mismatch', async () => {
@@ -491,29 +491,29 @@ test('Save falls back to full save on mismatch', async () => {
   if (!adapter) return;
 
   // Initial data
-  const initialData: TestData[] = [
+  const initial_data: TestData[] = [
     { id: '1', name: 'Item 1', value: 100 }
   ];
 
   await adapter.register(() => { });
-  await adapter.save(initialData, { added: initialData, modified: [], removed: [] });
+  await adapter.save(initial_data, { added: initial_data, modified: [], removed: [] });
 
   // Create a mismatch scenario - changes don't match final items
-  const finalItems: TestData[] = [
+  const final_items: TestData[] = [
     { id: '1', name: 'Item 1', value: 100 },
     { id: '2', name: 'Item 2', value: 200 },
     { id: '3', name: 'Item 3', value: 300 }
   ];
 
-  const incorrectChanges = {
+  const incorrect_changes = {
     added: [{ id: '2', name: 'Item 2', value: 200 }], // Missing item 3
     modified: [],
     removed: []
   };
 
-  // Should fall back to saving the complete finalItems array
-  await adapter.save(finalItems, incorrectChanges);
+  // Should fall back to saving the complete final_items array
+  await adapter.save(final_items, incorrect_changes);
 
   const result = await adapter.load();
-  expect(result.items).toEqual(finalItems);
+  expect(result.items).toEqual(final_items);
 });
