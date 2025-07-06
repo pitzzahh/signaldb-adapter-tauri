@@ -1,6 +1,7 @@
 # @pitzzahh/signaldb-tauri-fs
 
 [![npm version](https://badge.fury.io/js/@pitzzahh%2Fsignaldb-tauri-fs.svg)](https://badge.fury.io/js/@pitzzahh%2Fsignaldb-tauri-fs)
+[![Test](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml/badge.svg)](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A robust and secure persistence adapter for [SignalDB](https://github.com/signaldb/signaldb) in Tauri applications. Seamlessly persist your reactive data collections to the local filesystem with optional encryption support.
