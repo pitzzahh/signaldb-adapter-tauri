@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.1] - 2025-07-06
+
+### Added
+- Performance tests for adapter operations
+
+### Fixed
+- README npm version badge URL not working correctly (now uses PNG format for consistency) and some information about the package was missing in the README
+
 ## [2.1.0] - 2025-07-06
 
 ### 🛡️ SECURITY IMPROVEMENTS

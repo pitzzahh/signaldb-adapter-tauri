@@ -1,10 +1,10 @@
 # @pitzzahh/signaldb-adapter-tauri
 
-[![npm version](https://badge.fury.io/js/@pitzzahh%2Fsignaldb-adapter-tauri.svg?icon=si%3Anpm)](https://badge.fury.io/js/@pitzzahh%2Fsignaldb-adapter-tauri)
+[![npm version](https://badge.fury.io/js/@pitzzahh%2Fsignaldb-adapter-tauri.png?icon=si%3Anpm)](https://badge.fury.io/js/@pitzzahh%2Fsignaldb-adapter-tauri)
 [![Test](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml/badge.svg)](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A robust and secure persistence adapter for [SignalDB](https://github.com/signaldb/signaldb) in Tauri applications. Seamlessly persist your reactive data collections to the local filesystem with optional encryption support.
+A simple and reliable persistence adapter for [SignalDB](https://github.com/signaldb/signaldb) in Tauri applications. Persist your reactive data collections to the local filesystem with optional encryption support.
 
 ## ✨ Features
 
@@ -12,9 +12,9 @@ A robust and secure persistence adapter for [SignalDB](https://github.com/signal
 - 💾 **Native Tauri Integration** - Uses Tauri's secure filesystem API
 - 🔐 **Optional Encryption** - Protect your data with custom encryption functions
 - 📱 **Cross-Platform** - Works on Windows, macOS, and Linux
-- 🛡️ **Type Safe** - Full TypeScript support with comprehensive type definitions
+- 🎯 **Type Safe** - Full TypeScript support with comprehensive type definitions
 - ⚡ **Zero Dependencies** - No runtime dependencies, maximum performance
-- 🔄 **Auto-Recovery** - Graceful fallback for corrupted or encrypted data files
+- 🔄 **Auto-Recovery** - Graceful handling of corrupted or missing files
 
 ## 📦 Installation
 
@@ -52,52 +52,32 @@ const users = new Collection({
 users.insert({ name: 'John Doe', email: 'john@example.com' });
 ```
 
-### With Custom Base Directory
+> 📖 **Need more examples?** Check out our [Usage Examples](../../wiki/Usage-Examples) in the wiki.
+
+### With Encryption
 
 ```typescript
-import { BaseDirectory } from '@tauri-apps/api/path';
-import { createTauriFileSystemAdapter } from '@pitzzahh/signaldb-adapter-tauri';
-
-const adapter = createTauriFileSystemAdapter('app-data.json', {
-  base_dir: BaseDirectory.AppConfig // Store in app config directory
-});
-```
-
-## 🔐 Encryption & Security
-
-Protect sensitive data with custom encryption functions:
-
-```typescript
-import CryptoJS from 'crypto-js';
-
 const adapter = createTauriFileSystemAdapter('secure-data.json', {
-  encrypt: async (data) => {
-    const encrypted = CryptoJS.AES.encrypt(
-      JSON.stringify(data), 
-      'your-secret-key'
-    ).toString();
-    return encrypted;
-  },
-  decrypt: async (encryptedData) => {
-    const decrypted = CryptoJS.AES.decrypt(
-      encryptedData, 
-      'your-secret-key'
-    ).toString(CryptoJS.enc.Utf8);
-    return JSON.parse(decrypted);
-  }
-});
-```
-
-### Simple Base64 Encoding (for demo purposes)
-
-```typescript
-const adapter = createTauriFileSystemAdapter('data.json', {
   encrypt: async (data) => btoa(JSON.stringify(data)),
   decrypt: async (encoded) => JSON.parse(atob(encoded))
 });
 ```
 
-## 📋 API Reference
+> 🔐 **Want stronger encryption?** See our [Security Guide](../../wiki/Security-Guide) for production-ready encryption examples.
+
+### With Custom Base Directory
+
+```typescript
+import { BaseDirectory } from '@tauri-apps/plugin-fs';
+
+const adapter = createTauriFileSystemAdapter('app-data.json', {
+  base_dir: BaseDirectory.AppConfig
+});
+```
+
+> 📁 **Learn about all storage options:** [Storage Configuration](../../wiki/Storage-Configuration)
+
+##  API Reference
 
 ### `createTauriFileSystemAdapter(filename, options?)`
 
@@ -117,6 +97,7 @@ Creates a new persistence adapter instance.
 | `base_dir` | `BaseDirectory` | `AppLocalData` | Tauri base directory for file storage |
 | `encrypt` | `EncryptFunction` | `undefined` | Custom encryption function |
 | `decrypt` | `DecryptFunction` | `undefined` | Custom decryption function |
+| `security` | `SecurityOptions` | `{}` | Security configuration options |
 
 #### Type Definitions
 
@@ -124,82 +105,36 @@ Creates a new persistence adapter instance.
 type EncryptFunction = <T>(data: T) => Promise<string>;
 type DecryptFunction = <T>(encrypted: string) => Promise<T>;
 
+interface SecurityOptions {
+  enforceEncryption?: boolean;        // Require encryption functions
+  allowPlaintextFallback?: boolean;   // Allow plaintext fallback on decrypt failure
+  validateDecryptedData?: boolean;    // Validate data structure after decryption
+  propagateCallbackErrors?: boolean;  // Whether callback errors propagate
+  dataValidator?: <T>(data: unknown) => data is T[]; // Custom validation function
+}
+
 interface AdapterOptions {
   base_dir?: BaseDirectory;
   encrypt?: EncryptFunction;
   decrypt?: DecryptFunction;
+  security?: SecurityOptions;
 }
 ```
 
-## 🏗️ Complete Example
-
-Here's a comprehensive example showing how to build a todo app with encrypted persistence:
-
-```typescript
-import { Collection } from '@signaldb/core';
-import { createTauriFileSystemAdapter } from '@pitzzahh/signaldb-adapter-tauri';
-import { BaseDirectory } from '@tauri-apps/api/path';
-import CryptoJS from 'crypto-js';
-
-interface Todo {
-  id: string;
-  title: string;
-  completed: boolean;
-  createdAt: Date;
-}
-
-// Create encrypted persistence adapter
-const todosAdapter = createTauriFileSystemAdapter('todos.json', {
-  base_dir: BaseDirectory.AppLocalData,
-  encrypt: async (data) => {
-    return CryptoJS.AES.encrypt(
-      JSON.stringify(data), 
-      'my-app-secret-key'
-    ).toString();
-  },
-  decrypt: async (encryptedData) => {
-    const decrypted = CryptoJS.AES.decrypt(
-      encryptedData, 
-      'my-app-secret-key'
-    ).toString(CryptoJS.enc.Utf8);
-    return JSON.parse(decrypted);
-  }
-});
-
-// Create the collection
-const todos = new Collection<Todo>({
-  name: 'todos',
-  persistence: todosAdapter
-});
-
-// Use your collection
-const newTodo = {
-  id: crypto.randomUUID(),
-  title: 'Learn SignalDB with Tauri',
-  completed: false,
-  createdAt: new Date()
-};
-
-todos.insert(newTodo);
-
-// Data is automatically encrypted and saved to:
-// ~/.local/share/com.yourapp.dev/todos.json (Linux)
-// %APPDATA%/com.yourapp.dev/todos.json (Windows)
-// ~/Library/Application Support/com.yourapp.dev/todos.json (macOS)
-```
+> 📚 **For complete API documentation and advanced configuration options, visit our [Wiki](../../wiki).**
 
 ## 🛠️ Requirements
 
-- **Tauri**: v2.0 or higher
-- **SignalDB**: v1.0 or higher  
-- **Node.js**: v18.0 or higher
-- **TypeScript**: v5.0 or higher (optional but recommended)
+- **Tauri**: v2.0+ with `@tauri-apps/plugin-fs`
+- **SignalDB**: v1.0+  
+- **Node.js**: v18.0+
+- **TypeScript**: v5.0+ (recommended)
 
-> **Note**: This adapter has zero runtime dependencies. All required packages (`@tauri-apps/api`, `@tauri-apps/plugin-fs`, and `@signaldb/core`) are peer dependencies that should already be installed in your Tauri + SignalDB project.
+> **Note**: This adapter has zero runtime dependencies. All required packages are peer dependencies that should already be installed in your Tauri + SignalDB project.
 
 ## 📂 Storage Locations
 
-The adapter stores files in platform-specific directories:
+Files are stored in platform-specific directories:
 
 | Platform | Default Location |
 |----------|------------------|
@@ -207,21 +142,18 @@ The adapter stores files in platform-specific directories:
 | **Windows** | `%APPDATA%/[app-name]/` |
 | **macOS** | `~/Library/Application Support/[app-name]/` |
 
-## 🔧 Error Handling
+> 🗂️ **Need help with custom storage locations?** Check our [Storage Configuration Guide](../../wiki/Storage-Configuration).
 
-The adapter includes comprehensive error handling:
+## 📖 Documentation
 
-- **File Creation**: Automatically creates files and directories if they don't exist
-- **Encryption Errors**: Falls back to plain JSON if encryption fails
-- **Decryption Errors**: Gracefully handles corrupted encrypted data
-- **File System Errors**: Provides detailed error messages for debugging
+For detailed guides and examples, visit our **[Wiki](../../wiki)**:
 
-## 🧪 Testing
-
-```bash
-# Run the test suite
-bun test
-```
+- 📝 [Usage Examples](../../wiki/Usage-Examples) - Real-world examples and patterns
+- 🔐 [Security Guide](../../wiki/Security-Guide) - Encryption best practices and examples
+- 📁 [Storage Configuration](../../wiki/Storage-Configuration) - Custom directories and file management
+- ⚡ [Performance Tips](../../wiki/Performance-Tips) - Optimization strategies
+- 🔧 [Troubleshooting](../../wiki/Troubleshooting) - Common issues and solutions
+- 🏗️ [Migration Guide](../../wiki/Migration-Guide) - Upgrading from other adapters
 
 ## 🤝 Contributing
 
