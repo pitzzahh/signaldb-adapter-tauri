@@ -72,7 +72,7 @@ function createBackupFilename(filename: string): string {
  */
 export function createTauriFileSystemAdapter<T extends { id: ID } & Record<string, any>, ID = string>(
   filename: string,
-  options?: AdapterOptions
+  options?: AdapterOptions<T>
 ): PersistenceAdapter<T, ID> {
   // Validate filename for security
   validateFilename(filename);
@@ -118,7 +118,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
 
         try {
           if (options?.encrypt) {
-            initial_data = await options.encrypt<T[]>([]);
+            initial_data = await options.encrypt([]);
           } else {
             initial_data = JSON.stringify([]);
           }
@@ -160,7 +160,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
 
         if (options?.decrypt) {
           try {
-            decrypted_data = await options.decrypt<T[]>(text_content);
+            decrypted_data = await options.decrypt(text_content);
 
             // Validate decrypted data structure if validation is enabled
             if (security.validateDecryptedData) {
@@ -298,7 +298,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
 
         if (options?.encrypt) {
           try {
-            data_to_save = await options.encrypt<T[]>(updated_items);
+            data_to_save = await options.encrypt(updated_items);
           } catch (error) {
             throw new Error(`Failed to encrypt data for ${filename}`, { cause: error });
           }
