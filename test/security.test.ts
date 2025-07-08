@@ -240,7 +240,30 @@ test('Security: Callback errors are silenced when disabled', async () => {
   console.warn = originalWarn;
 });
 
-test('Security: Backup files are created on save', async () => {
+test('Security: Backup files are created on save when enabled', async () => {
+  // Set up existing data
+  const existing_data = new TextEncoder().encode(JSON.stringify([
+    { id: '1', name: 'existing', value: 1 }
+  ]));
+  mock_file_system.set('AppLocalData/test.json', existing_data);
+
+  const adapter = createTauriFileSystemAdapter<TestData>('test.json', {
+    security: { createBackups: true }
+  });
+  await adapter.register(mock());
+
+  const new_data: TestData[] = [{ id: '2', name: 'new', value: 2 }];
+  await adapter.save(new_data, { added: new_data, modified: [], removed: [] });
+
+  // Check that a backup file was created
+  const backup_files = Array.from(mock_file_system.keys()).filter(key =>
+    key.includes('test.json.backup.')
+  );
+
+  expect(backup_files.length).toBe(1);
+});
+
+test('Security: Backup files are NOT created by default (for sync scenarios)', async () => {
   // Set up existing data
   const existing_data = new TextEncoder().encode(JSON.stringify([
     { id: '1', name: 'existing', value: 1 }
@@ -253,12 +276,12 @@ test('Security: Backup files are created on save', async () => {
   const new_data: TestData[] = [{ id: '2', name: 'new', value: 2 }];
   await adapter.save(new_data, { added: new_data, modified: [], removed: [] });
 
-  // Check that a backup file was created
+  // Check that NO backup files were created
   const backup_files = Array.from(mock_file_system.keys()).filter(key =>
     key.includes('test.json.backup.')
   );
 
-  expect(backup_files.length).toBe(1);
+  expect(backup_files.length).toBe(0);
 });
 
 test('Security: Temporary files are cleaned up on successful write', async () => {
