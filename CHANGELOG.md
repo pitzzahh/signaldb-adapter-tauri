@@ -1,10 +1,11 @@
 # Changelog
 
-## [2.1.5] - 2025-07-08
+## [2.1.6] - 2025-07-08
 
 ### Fixed
 - **README updates**: Fixed outdated README content in npm package
 - **Documentation links**: Corrected incorrect links to wiki and documentation
+- **CI workflow**: Updated GitHub Actions workflow to use bun for installation while publishing with npm
 
 ## [2.1.3] - 2025-07-08
 
