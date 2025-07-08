@@ -12,6 +12,10 @@ export interface SecurityOptions {
   propagateCallbackErrors?: boolean;
   /** Custom data validator function */
   dataValidator?: <T>(data: unknown) => data is T[];
+  /** Whether to create backup files on save (default: false for sync scenarios) */
+  createBackups?: boolean;
+  /** Maximum number of backup files to keep (default: 5) */
+  maxBackups?: number;
 }
 
 export interface AdapterOptions<T> {
