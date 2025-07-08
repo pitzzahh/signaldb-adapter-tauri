@@ -1,6 +1,6 @@
 # @pitzzahh/signaldb-adapter-tauri
 
-[![npm version](https://badge.fury.io/js/@pitzzahh%2Fsignaldb-adapter-tauri.png?icon=si%3Anpm)](https://badge.fury.io/js/@pitzzahh%2Fsignaldb-adapter-tauri)
+[![npm version](https://img.shields.io/npm/v/@pitzzahh/signaldb-adapter-tauri?logo=npm)](https://www.npmjs.com/package/@pitzzahh/signaldb-adapter-tauri)
 [![Test](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml/badge.svg)](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
