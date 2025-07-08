@@ -97,7 +97,7 @@ Creates a new persistence adapter instance.
 | `base_dir` | `BaseDirectory` | `AppLocalData` | Tauri base directory for file storage |
 | `encrypt` | `EncryptFunction` | `undefined` | Custom encryption function |
 | `decrypt` | `DecryptFunction` | `undefined` | Custom decryption function |
-| `security` | `SecurityOptions` | `{}` | Security configuration options |
+| `security` | `Partial<SecurityOptions>` | `{}` | Security configuration options |
 
 #### Type Definitions
 
