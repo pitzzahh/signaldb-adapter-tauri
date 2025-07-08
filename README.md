@@ -52,7 +52,7 @@ const users = new Collection({
 users.insert({ name: 'John Doe', email: 'john@example.com' });
 ```
 
-> 📖 **Need more examples?** Check out our [Usage Examples](../../wiki/Usage-Examples) in the wiki.
+> 📖 **Need more examples?** Check out our [Usage Examples](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Usage%E2%80%90Examples) in the wiki.
 
 ### With Encryption
 
@@ -63,7 +63,7 @@ const adapter = createTauriFileSystemAdapter('secure-data.json', {
 });
 ```
 
-> 🔐 **Want stronger encryption?** See our [Security Guide](../../wiki/Security-Guide) for production-ready encryption examples.
+> 🔐 **Want stronger encryption?** See our [Security Guide](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Security%E2%80%90Guide) for production-ready encryption examples.
 
 ### With Custom Base Directory
 
@@ -75,7 +75,7 @@ const adapter = createTauriFileSystemAdapter('app-data.json', {
 });
 ```
 
-> 📁 **Learn about all storage options:** [Storage Configuration](../../wiki/Storage-Configuration)
+> 📁 **Learn about all storage options:** [Storage Configuration](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Storage%E2%80%90Configuration)
 
 ##  API Reference
 
@@ -130,7 +130,7 @@ export interface AdapterOptions<T> {
 }
 ```
 
-> 📚 **For complete API documentation and advanced configuration options, visit our [Wiki](../../wiki).**
+> 📚 **For complete API documentation and advanced configuration options, visit our [Wiki](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki).**
 
 ## 🛠️ Requirements
 
@@ -151,18 +151,18 @@ Files are stored in platform-specific directories:
 | **Windows** | `%APPDATA%/[app-name]/` |
 | **macOS** | `~/Library/Application Support/[app-name]/` |
 
-> 🗂️ **Need help with custom storage locations?** Check our [Storage Configuration Guide](../../wiki/Storage-Configuration).
+> 🗂️ **Need help with custom storage locations?** Check our [Storage Configuration Guide](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Storage%E2%80%90Configuration).
 
 ## 📖 Documentation
 
-For detailed guides and examples, visit our **[Wiki](../../wiki)**:
+For detailed guides and examples, visit our **[Wiki](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki)**:
 
-- 📝 [Usage Examples](../../wiki/Usage-Examples) - Real-world examples and patterns
-- 🔐 [Security Guide](../../wiki/Security-Guide) - Encryption best practices and examples
-- 📁 [Storage Configuration](../../wiki/Storage-Configuration) - Custom directories and file management
-- ⚡ [Performance Tips](../../wiki/Performance-Tips) - Optimization strategies
-- 🔧 [Troubleshooting](../../wiki/Troubleshooting) - Common issues and solutions
-- 🏗️ [Migration Guide](../../wiki/Migration-Guide) - Upgrading from other adapters
+- 📝 [Usage Examples](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Usage%E2%80%90Examples) - Real-world examples and patterns
+- 🔐 [Security Guide](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Security%E2%80%90Guide) - Encryption best practices and examples
+- 📁 [Storage Configuration](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Storage%E2%80%90Configuration) - Custom directories and file management
+- ⚡ [Performance Tips](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Performance%E2%80%90Tips) - Optimization strategies
+- 🔧 [Troubleshooting](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Troubleshooting) - Common issues and solutions
+- 🏗️ [Migration Guide](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Migration%E2%80%90Guide) - Upgrading from other adapters
 
 ## 🤝 Contributing
 
