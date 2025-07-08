@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.1.5] - 2025-07-08
+## [2.1.6] - 2025-07-08
 
 ### Fixed
 - **README updates**: Fixed outdated README content in npm package
