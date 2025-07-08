@@ -4,7 +4,7 @@
 [![Test](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml/badge.svg)](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A simple and reliable persistence adapter for [SignalDB](https://github.com/signaldb/signaldb) in Tauri applications. Persist your reactive data collections to the local filesystem with optional encryption support.
+A simple and reliable persistence adapter for [SignalDB](https://github.com/maxnowack/signaldb) in Tauri applications. Persist your reactive data collections to the local filesystem with optional encryption support.
 
 ## ✨ Features
 
