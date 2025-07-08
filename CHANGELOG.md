@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.2] - 2025-07-08
+
+### Added
+- **Bundle size optimization**: Minified bundle from ~29kB to ~20kB (31% reduction)
+
+### Fixed
+- **Type inference issues**: Fixed `EncryptFunction` and `DecryptFunction` type definitions to properly handle arrays (`T[]`) instead of single items (`T`)
+- **Unnecessary type assertions**: Removed explicit type assertions (`<T[]>`) from encrypt/decrypt function calls as TypeScript now correctly infers the types
+- **Better TypeScript support**: Improved type safety and developer experience with proper generic type constraints
+
 ## [2.1.1] - 2025-07-06
 
 ### Added
