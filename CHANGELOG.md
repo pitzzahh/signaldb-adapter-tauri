@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.1.5] - 2025-07-08
+
+### Fixed
+- **README updates**: Fixed outdated README content in npm package
+- **Documentation links**: Corrected incorrect links to wiki and documentation
+
 ## [2.1.3] - 2025-07-08
 
 ### Changed
