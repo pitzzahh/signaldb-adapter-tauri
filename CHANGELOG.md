@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.3] - 2025-07-08
+
+### Changed
+- **Backup creation disabled by default** - Prevents backup file accumulation during frequent sync operations
+- **Added backup configuration options** - `createBackups` and `maxBackups` security settings
+
+### Added
+- Backup cleanup mechanism when backups are enabled
+- Performance information logging for sync scenarios
+
 ## [2.1.2] - 2025-07-08
 
 ### Added
