@@ -6,7 +6,9 @@ We actively maintain and provide security updates for the following versions of 
 
 | Version | Supported          | Notes                          |
 | ------- | ------------------ | ------------------------------ |
-| 2.1.x   | :white_check_mark: | Latest stable, recommended     |
+| 2.3.x   | :white_check_mark: | Latest stable, recommended     |
+| 2.2.x   | :white_check_mark: | Still supported                |
+| 2.1.x   | :warning:          | Critical security fixes only   |
 | 2.0.x   | :warning:          | Critical security fixes only   |
 | 1.x.x   | :x:                | No longer supported            |
 | < 1.0   | :x:                | No longer supported            |

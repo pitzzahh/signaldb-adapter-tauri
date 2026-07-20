@@ -4,13 +4,13 @@
 [![Test](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml/badge.svg)](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A simple and reliable persistence adapter for [SignalDB](https://github.com/maxnowack/signaldb) in Tauri applications. Persist your reactive data collections to the local filesystem with optional encryption support.
+A simple and reliable persistence adapter for [SignalDB](https://github.com/maxnowack/signaldb) in Tauri applications. Persist your reactive data collections to the local filesystem with built-in AES-256-GCM encryption — recommended for all production apps.
 
 ## ✨ Features
 
 - 🚀 **Zero Configuration** - Works out of the box with sensible defaults
 - 💾 **Native Tauri Integration** - Uses Tauri's secure filesystem API
-- 🔐 **Optional Encryption** - Protect your data with custom encryption functions
+- 🔐 **Built-in Encryption** — AES-256-GCM via `createEncryption()`. Also supports custom encrypt/decrypt functions.
 - 📱 **Cross-Platform** - Works on Windows, macOS, and Linux
 - 🎯 **Type Safe** - Full TypeScript support with comprehensive type definitions
 - ⚡ **Zero Dependencies** - No runtime dependencies, maximum performance
@@ -21,16 +21,15 @@ A simple and reliable persistence adapter for [SignalDB](https://github.com/maxn
 Install the package using your preferred package manager:
 
 ```bash
-# npm
 npm install @pitzzahh/signaldb-adapter-tauri
-
-# yarn
+```
+```bash
 yarn add @pitzzahh/signaldb-adapter-tauri
-
-# pnpm
+```
+```bash
 pnpm add @pitzzahh/signaldb-adapter-tauri
-
-# bun
+```
+```bash
 bun add @pitzzahh/signaldb-adapter-tauri
 ```
 
@@ -52,18 +51,37 @@ const users = new Collection({
 users.insert({ name: 'John Doe', email: 'john@example.com' });
 ```
 
+> ⚠️ **Production apps should use encryption.** The example above stores data in plaintext. See [With Encryption](#with-encryption) below to enable built-in AES-256-GCM encryption in one line.
+
 > 📖 **Need more examples?** Check out our [Usage Examples](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Usage%E2%80%90Examples) in the wiki.
 
 ### With Encryption
 
+Use the built-in AES-256-GCM encryption (recommended):
+
 ```typescript
+import { createEncryption } from '@pitzzahh/signaldb-adapter-tauri';
+
+// AES-256-GCM authenticated encryption with PBKDF2 key derivation
+const { encrypt, decrypt } = createEncryption('your-strong-passphrase');
+
 const adapter = createTauriFileSystemAdapter('secure-data.json', {
-  encrypt: async (data) => btoa(JSON.stringify(data)),
-  decrypt: async (encoded) => JSON.parse(atob(encoded))
+  encrypt,
+  decrypt,
+  security: { enforceEncryption: true, allowPlaintextFallback: false }
 });
 ```
 
-> 🔐 **Want stronger encryption?** See our [Security Guide](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Security%E2%80%90Guide) for production-ready encryption examples.
+Or bring your own encryption functions with full control over the algorithm:
+
+```typescript
+const adapter = createTauriFileSystemAdapter('secure-data.json', {
+  encrypt: async (data) => yourCustomEncrypt(data),
+  decrypt: async (data) => yourCustomDecrypt(data)
+});
+```
+
+> 🔐 **Need key rotation?** `createEncryption` supports versioned passphrases. See our [Security Guide](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Security%E2%80%90Guide) for production-ready examples.
 
 ### With Custom Base Directory
 

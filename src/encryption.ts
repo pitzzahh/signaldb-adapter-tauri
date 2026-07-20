@@ -1,0 +1,241 @@
+/**
+ * AES-256-GCM encryption for the SignalDB Tauri adapter.
+ * Uses Web Crypto API with PBKDF2 key derivation (100k iterations).
+ * On-disk format: `v{version}:{base64(salt || iv || ciphertext+authTag)}`
+ */
+
+import type { EncryptFunction, DecryptFunction, EncryptionOptions, EncryptionPair } from './types';
+
+const eMsg = (e: unknown): string =>
+  e instanceof Error ? e.message : String(e);
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+/** Salt length in bytes (128 bits) */
+const SALT_LENGTH = 16;
+
+/** AES-GCM IV/nonce length in bytes (96 bits) */
+const IV_LENGTH = 12;
+
+/** Default PBKDF2 iteration count (OWASP 2025 recommendation: 100k for SHA-256) */
+const DEFAULT_ITERATIONS = 100_000;
+
+/** Separator between version prefix and payload */
+const VERSION_SEPARATOR = ':';
+
+/** Prefix marker for versioned payloads */
+const VERSION_PREFIX = 'v';
+
+// ─── Internal helpers ───────────────────────────────────────────────────
+
+/**
+ * Check whether the Web Crypto API is available.
+ * Should always be true in Tauri v2 webviews, but we guard for safety.
+ */
+function requireWebCrypto(): void {
+  if (
+    typeof crypto === 'undefined' ||
+    typeof crypto.subtle === 'undefined' ||
+    typeof crypto.getRandomValues === 'undefined'
+  ) {
+    throw new Error(
+      'Web Crypto API unavailable. Requires Tauri v2+ webview.'
+    );
+  }
+}
+
+/** Concatenate Uint8Arrays into a single buffer. */
+function concat(...arrays: Uint8Array[]): Uint8Array {
+  const total = arrays.reduce((sum, a) => sum + a.byteLength, 0);
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const a of arrays) {
+    result.set(a, offset);
+    offset += a.byteLength;
+  }
+  return result;
+}
+
+/**
+ * Derive an AES-256-GCM key from a passphrase using PBKDF2.
+ */
+async function deriveKey(
+  passphrase: string,
+  salt: Uint8Array,
+  iterations: number,
+): Promise<CryptoKey> {
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(passphrase) as any,
+    'PBKDF2',
+    false,
+    ['deriveKey'],
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: salt as any,
+      iterations,
+      hash: 'SHA-256',
+    },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+/**
+ * Parse a versioned payload string.
+ *
+ * Expected format: `v{version}:{base64payload}`
+ * Returns `null` if the string is not in the expected format
+ * (plaintext fallback — the caller should handle this gracefully).
+ */
+function parseVersionedPayload(
+  raw: string,
+): { version: number; payload: Uint8Array } | null {
+  // Must start with 'v' and contain the separator
+  if (!raw.startsWith(VERSION_PREFIX)) return null;
+
+  const sepIdx = raw.indexOf(VERSION_SEPARATOR);
+  if (sepIdx === -1) return null;
+
+  const versionStr = raw.slice(1, sepIdx);
+  const version = Number(versionStr);
+  if (!Number.isInteger(version) || version < 1) return null;
+
+  const base64 = raw.slice(sepIdx + 1);
+  if (base64.length === 0) return null;
+
+  try {
+    const binary = atob(base64);
+    const payload = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      payload[i] = binary.charCodeAt(i);
+    }
+    return { version, payload };
+  } catch {
+    return null; // Invalid base64
+  }
+}
+
+/**
+ * Encode a binary payload into the versioned string format.
+ */
+function encodeVersionedPayload(version: number, payload: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < payload.byteLength; i++) {
+    binary += String.fromCharCode(payload[i]);
+  }
+  return `${VERSION_PREFIX}${version}${VERSION_SEPARATOR}${btoa(binary)}`;
+}
+
+// ─── Public API ─────────────────────────────────────────────────────────
+
+/**
+ * Create an encryption/decryption pair using AES-256-GCM.
+ *
+ * @param passphrases - A passphrase string or a map of version numbers
+ *   to passphrases for key rotation.
+ * @param options - Optional configuration for iterations and active version.
+ * @returns An object with `encrypt` and `decrypt` functions.
+ */
+export function createEncryption(
+  passphrases: string | Record<number, string>,
+  options: EncryptionOptions = {},
+): EncryptionPair {
+  requireWebCrypto();
+
+  const passphraseMap: Record<number, string> =
+    typeof passphrases === 'string' ? { 1: passphrases } : { ...passphrases };
+
+  const activeVersion = options.version ?? 1;
+  const iterations = options.iterations ?? DEFAULT_ITERATIONS;
+
+  if (!Number.isInteger(activeVersion) || activeVersion < 1) {
+    throw new Error(`Version must be a positive integer, got ${activeVersion}`);
+  }
+
+  if (!passphraseMap[activeVersion]) {
+    throw new Error(
+      `No passphrase for version ${activeVersion}. Available: ${Object.keys(passphraseMap).join(', ')}`,
+    );
+  }
+
+  if (iterations < 10_000) {
+    console.warn(
+      `[SECURITY] PBKDF2 iterations low (${iterations}). OWASP recommends >=100,000.`,
+    );
+  }
+
+  const encrypt: EncryptFunction<unknown> = async (data) => {
+    const passphrase = passphraseMap[activeVersion];
+    const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
+    const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+
+    const key = await deriveKey(passphrase, salt, iterations);
+
+    const plaintext = encoder.encode(JSON.stringify(data));
+    // AES-GCM appends the 16-byte authentication tag to the ciphertext
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv as any },
+      key,
+      plaintext as any,
+    );
+
+    const binaryPayload = concat(salt, iv, new Uint8Array(encrypted));
+    return encodeVersionedPayload(activeVersion, binaryPayload);
+  };
+
+  const decrypt: DecryptFunction<unknown> = async (raw) => {
+    const parsed = parseVersionedPayload(raw);
+    if (!parsed) {
+      throw new Error(
+        'Invalid encrypted payload: not in versioned format.',
+      );
+    }
+
+    const { version, payload } = parsed;
+    const passphrase = passphraseMap[version];
+    if (!passphrase) {
+      throw new Error(
+        `Unknown key version ${version}. Available: ${Object.keys(passphraseMap).join(', ')}.`,
+      );
+    }
+
+    if (payload.byteLength < SALT_LENGTH + IV_LENGTH + 16) {
+      // Minimum: salt (16) + iv (12) + at least 1 byte ciphertext + 16 byte auth tag
+      throw new Error(
+        'Payload too short — truncated or corrupted.',
+      );
+    }
+
+    const salt = payload.slice(0, SALT_LENGTH);
+    const iv = payload.slice(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
+    const ciphertext = payload.slice(SALT_LENGTH + IV_LENGTH);
+
+    const key = await deriveKey(passphrase, salt, iterations);
+
+    let decrypted: ArrayBuffer;
+    try {
+      decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: iv as any },
+        key,
+        ciphertext as any,
+      );
+    } catch (err) {
+      const msg = eMsg(err);
+      throw new Error(
+        `Decryption failed (v${version}): ${msg}.`,
+        { cause: err },
+      );
+    }
+
+    const plaintext = decoder.decode(decrypted);
+    return JSON.parse(plaintext);
+  };
+
+  return { encrypt, decrypt };
+}

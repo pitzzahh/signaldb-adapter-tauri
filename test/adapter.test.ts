@@ -83,19 +83,16 @@ const mock_rename_fn = mock(async (oldPath: string, newPath: string, options?: {
   mock_file_system.delete(old_full);
 });
 
-mock.module('@tauri-apps/plugin-fs', () => {
-  const actual = require('@tauri-apps/plugin-fs');
-  return {
-    ...actual,
-    exists: mock_exists,
-    readFile: mock_read_file,
-    readDir: mock_read_dir,
-    writeFile: mock_write_file,
-    open: mock_open,
-    remove: mock_remove,
-    rename: mock_rename_fn,
-  };
-});
+mock.module('@tauri-apps/plugin-fs', () => ({
+  BaseDirectory,
+  exists: mock_exists,
+  readFile: mock_read_file,
+  readDir: mock_read_dir,
+  writeFile: mock_write_file,
+  open: mock_open,
+  remove: mock_remove,
+  rename: mock_rename_fn,
+}));
 
 // Import after mocking
 const { createTauriFileSystemAdapter } = await import('../src/index');
@@ -119,7 +116,7 @@ beforeEach(() => {
   console.warn = (...args: any[]) => {
     const message = args.join(' ');
     // Only suppress specific expected warnings
-    if (message.includes('[SECURITY WARNING]') ||
+    if (message.includes('[SECURITY]') ||
       message.includes('Failed to create backup') ||
       message.includes('Incremental update mismatch')) {
       return; // Suppress these expected warnings
@@ -364,7 +361,7 @@ test('Handles save errors gracefully', async () => {
   should_fail_encryption = true;
 
   // Should throw error on save due to encryption failure
-  expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] })).rejects.toThrow('Failed to save data to test.json');
+  expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] })).rejects.toThrow('Failed to save test.json');
 });
 
 test('Handles register encryption errors gracefully', async () => {

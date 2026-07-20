@@ -1,14 +1,15 @@
 {
   "name": "@pitzzahh/signaldb-adapter-tauri",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "description": "A SignalDB persistence adapter for Tauri apps with optional encryption support",
   "module": "dist/index.js",
   "type": "module",
   "scripts": {
     "build": "bun build src/index.ts --outdir dist --target node --minify --external @signaldb/core --external @tauri-apps/plugin-fs --external @tauri-apps/api && tsc --declaration --emitDeclarationOnly --outDir dist",
-    "test": "bun test",
+    "test": "bun test test/",
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
+    "bench": "bun test scripts/bench.test.ts",
     "prepublishOnly": "bun run build && bun test"
   },
   "repository": {
@@ -51,10 +52,7 @@
   },
   "devDependencies": {
     "@tauri-apps/plugin-fs": "^2.5.1",
-    "@tauri-apps/api": "^2.11.1",
     "@signaldb/core": "^1.8.1",
-    "@types/bun": "latest",
-    "bun-types": "latest",
     "typescript": "^7.0.2"
   },
   "engines": {

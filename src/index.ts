@@ -14,6 +14,11 @@ import {
 } from '@tauri-apps/plugin-fs';
 import { SecurityOptions, AdapterOptions } from './types';
 
+const eMsg = (e: unknown): string =>
+  e instanceof Error ? e.message : String(e);
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
 /**
  * Validates and sanitizes filename to prevent path traversal attacks
  */
@@ -24,12 +29,12 @@ function validateFilename(filename: string): void {
 
   // Check for path traversal attempts
   if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
-    throw new Error('Invalid filename: possible path traversal detected');
+    throw new Error('Invalid filename: path traversal detected');
   }
 
   // Check for other dangerous characters
   if (filename.includes('\0') || filename.includes('\n') || filename.includes('\r')) {
-    throw new Error('Invalid filename: contains null or newline characters');
+    throw new Error('Invalid filename: null or newline characters');
   }
 
   // Ensure reasonable length
@@ -82,24 +87,12 @@ async function cleanupOldBackups(
 }
 
 /**
- * Creates a persistence adapter for SignalDB that uses Tauri's filesystem API.
- * 
- * Features:
- * - Automatic file creation and initialization
- * - Optional encryption/decryption support with security validation
- * - Atomic write operations for data safety
- * - Change callbacks for reactive updates
- * - Cross-platform Tauri filesystem integration
- * - Graceful error handling and recovery
- * - Security hardening against common attacks
- * - Optional backup creation (disabled by default for sync scenarios)
- * 
- * @template T - The type of items to store, must have an ID field and can contain other properties
- * @template ID - The type of the ID field, defaults to string
- * @param {string} filename - The name of the file to store data in (sanitized for security)
- * @param {AdapterOptions} [options] - Configuration options including security settings
- * @returns {PersistenceAdapter<T, ID>} A configured persistence adapter instance
- * @throws {Error} If there is an error during file operations or security validation fails
+ * Creates a SignalDB persistence adapter backed by Tauri's filesystem API.
+ * Supports optional AES-256-GCM encryption, atomic writes, and backups.
+ *
+ * @param filename - The file to store data in (sanitized for security).
+ * @param options - Configuration including encryption and security settings.
+ * @returns A configured persistence adapter instance.
  */
 export function createTauriFileSystemAdapter<T extends { id: ID } & Record<string, any>, ID = string>(
   filename: string,
@@ -123,25 +116,23 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
   // Security check: warn about unencrypted storage
   if (!options?.encrypt && !security.enforceEncryption) {
     console.warn(
-      `[SECURITY WARNING] No encryption function provided for ${filename}. ` +
-      'Data will be stored in plaintext. Consider enabling encryption for sensitive data.'
+      `[SECURITY] No encryption for ${filename}. ` +
+      'Data stored as plaintext. Enable encryption for production.',
     );
   }
 
   // Performance tip: inform about backup behavior for sync scenarios
   if (security.createBackups) {
     console.info(
-      `[PERFORMANCE INFO] Backup creation is enabled for ${filename}. ` +
-      'For sync scenarios with frequent writes, consider disabling backups ' +
-      'by setting security.createBackups to false.'
+      `[INFO] Backups enabled for ${filename}. ` +
+      'Disable via security.createBackups:false for sync scenarios.',
     );
   }
 
   // Security check: enforce encryption if required
   if (security.enforceEncryption && (!options?.encrypt || !options?.decrypt)) {
     throw new Error(
-      'Encryption is enforced but encrypt/decrypt functions are not provided. ' +
-      'This is a security requirement.'
+      'Encryption enforced but encrypt/decrypt not provided.',
     );
   }
 
@@ -165,7 +156,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
             initial_data = JSON.stringify([]);
           }
 
-          await writeFile(filename, new TextEncoder().encode(initial_data), {
+          await writeFile(filename, encoder.encode(initial_data), {
             baseDir: base_dir
           });
         } catch (error) {
@@ -190,7 +181,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
         try {
           contents = await readFile(filename, { baseDir: base_dir });
         } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
+          const msg = eMsg(error);
           // Only return empty if the file truly doesn't exist
           if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('no such file')) {
             return { items: [] };
@@ -198,7 +189,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
           throw error; // Re-throw I/O errors, permission errors, etc.
         }
 
-        const text_content = new TextDecoder().decode(contents);
+        const text_content = decoder.decode(contents);
 
         if (!text_content.trim()) return { items: [] };
 
@@ -212,22 +203,20 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
             if (security.validateDecryptedData) {
               const validator = security.dataValidator || defaultDataValidator;
               if (!validator<T>(decrypted_data)) {
-                throw new Error('Decrypted data failed validation - possible data corruption or tampering');
+                throw new Error('Decrypted data failed validation - corruption or tampering');
               }
             }
           } catch (decryptError) {
-            const errorMsg = decryptError instanceof Error ? decryptError.message : String(decryptError);
+            const errorMsg = eMsg(decryptError);
             if (!security.allowPlaintextFallback) {
               throw new Error(
-                `Decryption failed and plaintext fallback is disabled. ` +
-                `This could indicate data tampering or corruption: ${errorMsg}`,
+                `Decryption failed, plaintext fallback disabled: ${errorMsg}`,
                 { cause: decryptError }
               );
             }
 
             console.warn(
-              `[SECURITY WARNING] Decryption failed for ${filename}. ` +
-              'Attempting plaintext fallback. This could indicate data tampering.',
+              `[SECURITY] Decryption failed for ${filename}, trying plaintext fallback.`,
               decryptError
             );
 
@@ -242,9 +231,9 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
                 }
               }
             } catch (parseError) {
-              const parseMsg = parseError instanceof Error ? parseError.message : String(parseError);
+              const parseMsg = eMsg(parseError);
               throw new Error(
-                `Both decryption and plaintext parsing failed for ${filename}: ${parseMsg}`,
+                `Decryption and plaintext parse both failed for ${filename}: ${parseMsg}`,
                 { cause: parseError }
               );
             }
@@ -261,7 +250,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
               }
             }
           } catch (parseError) {
-            const errorMsg = parseError instanceof Error ? parseError.message : String(parseError);
+            const errorMsg = eMsg(parseError);
             if (errorMsg.includes('validation')) {
               throw parseError; // Re-throw validation errors as-is
             }
@@ -271,7 +260,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
 
         return { items: decrypted_data };
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
+        const errorMsg = eMsg(error);
         // For certain errors, propagate them directly
         if (errorMsg.includes('Decryption failed and plaintext fallback is disabled') ||
           errorMsg.includes('Data failed validation') ||
@@ -279,7 +268,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
           throw error;
         }
         // For other errors, wrap them for context
-        throw new Error(`Failed to load data from ${filename}: ${errorMsg}`, { cause: error });
+        throw new Error(`Failed to load ${filename}: ${errorMsg}`, { cause: error });
       }
     },
     async save(items, changes) {
@@ -312,8 +301,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
           }
         } catch (error) {
           throw new Error(
-            `Failed to load current data for ${filename} during save. ` +
-            'Refusing to save to prevent data loss.',
+            `Failed to read ${filename} during save. Refusing to save to prevent data loss.`,
             { cause: error }
           );
         }
@@ -347,7 +335,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
 
         if (expected_ids.size !== actual_ids.size ||
           ![...expected_ids].every(id => actual_ids.has(id))) {
-          console.warn('Incremental update mismatch, falling back to full save');
+          console.warn('Incremental update mismatch, using full save');
           updated_items = items;
         }
 
@@ -368,16 +356,16 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
 
         try {
           // Write to temporary file
-          await writeFile(temp_filename, new TextEncoder().encode(data_to_save), {
+          await writeFile(temp_filename, encoder.encode(data_to_save), {
             baseDir: base_dir
           });
 
           // Verify the temporary file was written correctly
           try {
             const temp_contents = await readFile(temp_filename, { baseDir: base_dir });
-            const temp_text = new TextDecoder().decode(temp_contents);
+            const temp_text = decoder.decode(temp_contents);
             if (temp_text !== data_to_save) {
-              throw new Error('Temporary file verification failed - data mismatch');
+              throw new Error('Temp file verification failed');
             }
           } catch (verifyError) {
             // If verification fails, continue anyway for compatibility
@@ -401,7 +389,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
           } catch (cleanupError) {
             console.warn(`Failed to cleanup temp file after error:`, cleanupError);
           }
-          throw new Error(`Failed to write data to ${filename}`, { cause: writeError });
+          throw new Error(`Failed to write ${filename}`, { cause: writeError });
         }
 
         // Notify callback about the change if registered
@@ -420,11 +408,11 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
         }
       } catch (error) {
         // Re-throw specific errors without wrapping
-        const errorMsg = error instanceof Error ? error.message : String(error);
+        const errorMsg = eMsg(error);
         if (errorMsg.includes('Change callback failed') || errorMsg.includes('Refusing to save')) {
           throw error;
         }
-        throw new Error(`Failed to save data to ${filename}`, { cause: error });
+        throw new Error(`Failed to save ${filename}`, { cause: error });
       }
     },
     async unregister() {
@@ -435,4 +423,5 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
   }) as PersistenceAdapter<T, ID>;
 }
 
-export type { EncryptFunction, DecryptFunction, SecurityOptions, AdapterOptions } from './types';
+export { createEncryption } from './encryption';
+export type { EncryptFunction, DecryptFunction, EncryptedPayload, SecurityOptions, AdapterOptions, EncryptionOptions, EncryptionPair } from './types';

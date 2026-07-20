@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.3.0] — Built-in AES-256-GCM encryption
+
+### Added
+- **`createEncryption()`** — Built-in encryption utility using Web Crypto API (AES-256-GCM + PBKDF2 with 100k iterations). No external dependencies, available in all Tauri v2 webviews. Drop-in compatible with the adapter's `encrypt`/`decrypt` options.
+- **Key rotation support** — Versioned passphrase maps enable seamless key rotation. Old passphrases stay configured for reading legacy data; new writes use the current version.
+- **`EncryptedPayload` type** — Documents the on-disk format (`v{version}:{base64(salt ‖ iv ‖ ciphertext+authTag)}`).
+- **`EncryptionOptions` and `EncryptionPair` types** — Typed API surface for the encryption utility.
+- Comprehensive encryption test suite (`test/encryption.test.ts`) covering round-trips, tampering detection, key rotation, truncation, Unicode, and nested data.
+
+### Fixed
+- **README security example** — Replaced the Base64 "encryption" example (encoding, not encryption) with `createEncryption()` — real AES-256-GCM.
+- **Wiki Security Guide** — Rewritten to recommend the built-in utility and explicitly warn against HMAC-only and Base64-as-encryption patterns.
+
+### Changed
+- `src/types.ts` — Added `EncryptedPayload` interface.
+- `src/index.ts` — Re-exports `createEncryption`, `EncryptionOptions`, `EncryptionPair`, and `EncryptedPayload`.
+
 ## [2.2.1] — CI & trusted publishing
 
 ### Changed
