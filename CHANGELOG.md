@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.2.0] — Atomic writes & data safety
+
+### Fixed
+- **Atomic file writes** — Replaced the `write temp → remove old → write final` pattern with `rename`, which is atomic on most filesystems. Prevents data loss on crash between remove and write.
+- **Backup cleanup** — `cleanupOldBackups` was a dead stub that only logged. Now uses `readDir` to list and prune old backups, respecting `maxBackups`.
+- **Silent data loss on load failure** — `load()` previously caught ALL read errors and returned `{ items: [] }`, including transient I/O errors. Now only returns empty for genuine file-not-found; re-throws other errors. `save()` no longer falls back to an empty array on load failure — it throws to prevent silently destroying all existing data.
+- **Temp file collision** — `Date.now()` produced the same temp filename for concurrent saves in the same millisecond, causing write races. Now uses `crypto.randomUUID()` for unique names.
+- **Backup filename collision** — Same `Date.now()` issue; now uses `crypto.randomUUID()` as well.
+
+### Changed
+- **Breaking (behavioral)**: `load()` now throws on I/O errors instead of silently returning `{ items: [] }`.
+- **Breaking (behavioral)**: `save()` throws `"Refusing to save to prevent data loss"` when it cannot read the current file state, instead of silently destroying all existing data.
+
+### Added
+- Comprehensive regression test suite (`test/regression.test.ts`)
+- 33 new edge case tests (`test/edge-cases.test.ts`) covering Unicode, optional fields, encryption, callbacks, lifecycle, null/undefined changes, deeply nested data, and more.
+
 ## [2.1.6] - 2025-07-08
 
 ### Fixed
