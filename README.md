@@ -21,16 +21,15 @@ A simple and reliable persistence adapter for [SignalDB](https://github.com/maxn
 Install the package using your preferred package manager:
 
 ```bash
-# npm
 npm install @pitzzahh/signaldb-adapter-tauri
-
-# yarn
+```
+```bash
 yarn add @pitzzahh/signaldb-adapter-tauri
-
-# pnpm
+```
+```bash
 pnpm add @pitzzahh/signaldb-adapter-tauri
-
-# bun
+```
+```bash
 bun add @pitzzahh/signaldb-adapter-tauri
 ```
 
