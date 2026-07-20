@@ -1,9 +1,15 @@
 name: Publish Package to npmjs
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'package.json'
   release:
     types: [published]
+  workflow_dispatch:
+
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -16,6 +22,21 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - uses: oven-sh/setup-bun@v2
       - run: bun install
+
+      - name: Check if version already published
+        id: check
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          PUBLISHED_VERSION=$(npm view @pitzzahh/signaldb-adapter-tauri version 2>/dev/null || echo "0.0.0")
+          if [ "$PACKAGE_VERSION" != "$PUBLISHED_VERSION" ]; then
+            echo "should_publish=true" >> $GITHUB_OUTPUT
+            echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "should_publish=false" >> $GITHUB_OUTPUT
+            echo "Version $PACKAGE_VERSION already published, skipping."
+          fi
+
       - run: npm publish --provenance --access public
+        if: steps.check.outputs.should_publish == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
