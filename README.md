@@ -56,14 +56,31 @@ users.insert({ name: 'John Doe', email: 'john@example.com' });
 
 ### With Encryption
 
+Use the built-in AES-256-GCM encryption (recommended):
+
 ```typescript
+import { createEncryption } from '@pitzzahh/signaldb-adapter-tauri';
+
+// AES-256-GCM authenticated encryption with PBKDF2 key derivation
+const { encrypt, decrypt } = createEncryption('your-strong-passphrase');
+
 const adapter = createTauriFileSystemAdapter('secure-data.json', {
-  encrypt: async (data) => btoa(JSON.stringify(data)),
-  decrypt: async (encoded) => JSON.parse(atob(encoded))
+  encrypt,
+  decrypt,
+  security: { enforceEncryption: true, allowPlaintextFallback: false }
 });
 ```
 
-> 🔐 **Want stronger encryption?** See our [Security Guide](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Security%E2%80%90Guide) for production-ready encryption examples.
+Or bring your own encryption functions with full control over the algorithm:
+
+```typescript
+const adapter = createTauriFileSystemAdapter('secure-data.json', {
+  encrypt: async (data) => yourCustomEncrypt(data),
+  decrypt: async (data) => yourCustomDecrypt(data)
+});
+```
+
+> 🔐 **Need key rotation?** `createEncryption` supports versioned passphrases. See our [Security Guide](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Security%E2%80%90Guide) for production-ready examples.
 
 ### With Custom Base Directory
 
