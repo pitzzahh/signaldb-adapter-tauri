@@ -83,19 +83,16 @@ const mock_rename_fn = mock(async (oldPath: string, newPath: string, options?: {
   mock_file_system.delete(old_full);
 });
 
-mock.module('@tauri-apps/plugin-fs', () => {
-  const actual = require('@tauri-apps/plugin-fs');
-  return {
-    ...actual,
-    exists: mock_exists,
-    readFile: mock_read_file,
-    readDir: mock_read_dir,
-    writeFile: mock_write_file,
-    open: mock_open,
-    remove: mock_remove,
-    rename: mock_rename_fn,
-  };
-});
+mock.module('@tauri-apps/plugin-fs', () => ({
+  BaseDirectory,
+  exists: mock_exists,
+  readFile: mock_read_file,
+  readDir: mock_read_dir,
+  writeFile: mock_write_file,
+  open: mock_open,
+  remove: mock_remove,
+  rename: mock_rename_fn,
+}));
 
 // Import after mocking
 const { createTauriFileSystemAdapter } = await import('../src/index');
