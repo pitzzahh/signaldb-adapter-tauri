@@ -1,31 +1,15 @@
 /**
- * Built-in encryption utility for the SignalDB Tauri adapter.
- *
- * Uses the Web Crypto API (available in all Tauri webviews) to provide
- * AES-256-GCM authenticated encryption with PBKDF2 key derivation.
- *
- * **Algorithm details:**
- * - **Key derivation**: PBKDF2 with SHA-256, 100,000 iterations (OWASP 2025 recommendation)
- * - **Encryption**: AES-256-GCM (authenticated, detects tampering)
- * - **Salt**: 16 random bytes per encryption session
- * - **IV/Nonce**: 12 random bytes per encryption operation (GCM standard)
- * - **Key versioning**: Embedded version tag enables seamless key rotation
- *
- * **On-disk format:**
- * ```
- * v{version}:{base64(salt || iv || ciphertext+authTag)}
- * ```
- *
- * **⚠️ Important security notes:**
- * - A low-entropy passphrase (e.g., a short password) is the weakest link.
- *   Use a high-entropy string (32+ random chars) or derive from a user password
- *   with additional protections (e.g., OS keychain).
- * - This provides **at-rest** encryption. Data is decrypted in memory during use.
- * - Key rotation is handled via the version prefix — old data remains readable
- *   if you keep the old passphrase in the map.
+ * AES-256-GCM encryption for the SignalDB Tauri adapter.
+ * Uses Web Crypto API with PBKDF2 key derivation (100k iterations).
+ * On-disk format: `v{version}:{base64(salt || iv || ciphertext+authTag)}`
  */
 
 import type { EncryptFunction, DecryptFunction, EncryptionOptions, EncryptionPair } from './types';
+
+const eMsg = (e: unknown): string =>
+  e instanceof Error ? e.message : String(e);
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 /** Salt length in bytes (128 bits) */
 const SALT_LENGTH = 16;
@@ -55,20 +39,9 @@ function requireWebCrypto(): void {
     typeof crypto.getRandomValues === 'undefined'
   ) {
     throw new Error(
-      'Web Crypto API is not available. ' +
-        'This encryption utility requires a Tauri v2 webview or equivalent ' +
-        'environment with crypto.subtle support.'
+      'Web Crypto API unavailable. Requires Tauri v2+ webview.'
     );
   }
-}
-
-/**
- * Cast a Uint8Array for use with Web Crypto API methods.
- * Workaround for TS 7.0 where Uint8Array generic defaults to ArrayBufferLike
- * instead of ArrayBuffer, making it incompatible with BufferSource.
- */
-function asBufferSource(arr: Uint8Array): Uint8Array<ArrayBuffer> {
-  return arr as Uint8Array<ArrayBuffer>;
 }
 
 /** Concatenate Uint8Arrays into a single buffer. */
@@ -91,10 +64,9 @@ async function deriveKey(
   salt: Uint8Array,
   iterations: number,
 ): Promise<CryptoKey> {
-  const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
-    asBufferSource(enc.encode(passphrase) as Uint8Array),
+    encoder.encode(passphrase) as any,
     'PBKDF2',
     false,
     ['deriveKey'],
@@ -103,7 +75,7 @@ async function deriveKey(
   return crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
-      salt: asBufferSource(salt),
+      salt: salt as any,
       iterations,
       hash: 'SHA-256',
     },
@@ -165,34 +137,10 @@ function encodeVersionedPayload(version: number, payload: Uint8Array): string {
 /**
  * Create an encryption/decryption pair using AES-256-GCM.
  *
- * @param passphrases - A single passphrase string (used for version 1) or a
- *   map of version numbers to passphrases for key rotation support.
- * @param options - Optional configuration for iteration count and active version.
- * @returns An object with `encrypt` and `decrypt` functions that can be
- *   passed directly to `createTauriFileSystemAdapter`.
- *
- * @example
- * ```ts
- * // Simple usage — single passphrase
- * import { createEncryption } from '@pitzzahh/signaldb-adapter-tauri';
- *
- * const { encrypt, decrypt } = createEncryption('your-strong-passphrase');
- *
- * const adapter = createTauriFileSystemAdapter('data.json', {
- *   encrypt,
- *   decrypt,
- *   security: { enforceEncryption: true, allowPlaintextFallback: false }
- * });
- * ```
- *
- * @example
- * ```ts
- * // Key rotation support
- * const { encrypt, decrypt } = createEncryption({
- *   1: 'old-passphrase',  // old key, kept for reading old data
- *   2: 'new-passphrase',  // current key, used for new writes
- * }, { version: 2 });
- * ```
+ * @param passphrases - A passphrase string or a map of version numbers
+ *   to passphrases for key rotation.
+ * @param options - Optional configuration for iterations and active version.
+ * @returns An object with `encrypt` and `decrypt` functions.
  */
 export function createEncryption(
   passphrases: string | Record<number, string>,
@@ -207,20 +155,18 @@ export function createEncryption(
   const iterations = options.iterations ?? DEFAULT_ITERATIONS;
 
   if (!Number.isInteger(activeVersion) || activeVersion < 1) {
-    throw new Error(`Version must be a positive integer, got: ${activeVersion}`);
+    throw new Error(`Version must be a positive integer, got ${activeVersion}`);
   }
 
   if (!passphraseMap[activeVersion]) {
     throw new Error(
-      `No passphrase configured for version ${activeVersion}. ` +
-        `Available versions: ${Object.keys(passphraseMap).join(', ')}`,
+      `No passphrase for version ${activeVersion}. Available: ${Object.keys(passphraseMap).join(', ')}`,
     );
   }
 
   if (iterations < 10_000) {
     console.warn(
-      `[SECURITY WARNING] PBKDF2 iterations set to ${iterations}. ` +
-        'OWASP recommends at least 100,000 for SHA-256.',
+      `[SECURITY] PBKDF2 iterations low (${iterations}). OWASP recommends >=100,000.`,
     );
   }
 
@@ -231,12 +177,12 @@ export function createEncryption(
 
     const key = await deriveKey(passphrase, salt, iterations);
 
-    const plaintext = new TextEncoder().encode(JSON.stringify(data));
+    const plaintext = encoder.encode(JSON.stringify(data));
     // AES-GCM appends the 16-byte authentication tag to the ciphertext
     const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: asBufferSource(iv) },
+      { name: 'AES-GCM', iv: iv as any },
       key,
-      asBufferSource(plaintext),
+      plaintext as any,
     );
 
     const binaryPayload = concat(salt, iv, new Uint8Array(encrypted));
@@ -247,9 +193,7 @@ export function createEncryption(
     const parsed = parseVersionedPayload(raw);
     if (!parsed) {
       throw new Error(
-        'Failed to parse encrypted payload: data is not in the expected ' +
-          'versioned format. The data may be unencrypted, corrupted, or ' +
-          'encrypted with a different scheme.',
+        'Invalid encrypted payload: not in versioned format.',
       );
     }
 
@@ -257,16 +201,14 @@ export function createEncryption(
     const passphrase = passphraseMap[version];
     if (!passphrase) {
       throw new Error(
-        `Unknown key version: ${version}. ` +
-          `Available versions: ${Object.keys(passphraseMap).join(', ')}. ` +
-          'This data was encrypted with a key that is no longer configured.',
+        `Unknown key version ${version}. Available: ${Object.keys(passphraseMap).join(', ')}.`,
       );
     }
 
     if (payload.byteLength < SALT_LENGTH + IV_LENGTH + 16) {
       // Minimum: salt (16) + iv (12) + at least 1 byte ciphertext + 16 byte auth tag
       throw new Error(
-        'Encrypted payload is too short — data may be truncated or corrupted.',
+        'Payload too short — truncated or corrupted.',
       );
     }
 
@@ -279,20 +221,19 @@ export function createEncryption(
     let decrypted: ArrayBuffer;
     try {
       decrypted = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: asBufferSource(iv) },
+        { name: 'AES-GCM', iv: iv as any },
         key,
-        asBufferSource(ciphertext),
+        ciphertext as any,
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = eMsg(err);
       throw new Error(
-        `Decryption failed (version ${version}): ${msg}. ` +
-          'This may indicate a wrong passphrase, tampered data, or corruption.',
+        `Decryption failed (v${version}): ${msg}.`,
         { cause: err },
       );
     }
 
-    const plaintext = new TextDecoder().decode(decrypted);
+    const plaintext = decoder.decode(decrypted);
     return JSON.parse(plaintext);
   };
 

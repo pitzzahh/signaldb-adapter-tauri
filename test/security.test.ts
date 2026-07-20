@@ -97,7 +97,7 @@ beforeEach(() => {
   console.warn = (...args: any[]) => {
     const message = args.join(' ');
     // Only suppress specific expected warnings
-    if (message.includes('[SECURITY WARNING]') ||
+    if (message.includes('[SECURITY]') ||
       message.includes('Failed to create backup') ||
       message.includes('Incremental update mismatch')) {
       return; // Suppress these expected warnings
@@ -149,7 +149,7 @@ test('Security: Warning when no encryption provided', () => {
 
   createTauriFileSystemAdapter<TestData>('test.json');
 
-  expect(warnings.some(w => w.includes('[SECURITY WARNING] No encryption function provided'))).toBe(true);
+  expect(warnings.some(w => w.includes('[SECURITY] No encryption for'))).toBe(true);
 
   console.warn = originalWarn;
 });
@@ -159,7 +159,7 @@ test('Security: Enforce encryption throws when encrypt/decrypt missing', () => {
     createTauriFileSystemAdapter<TestData>('test.json', {
       security: { enforceEncryption: true }
     });
-  }).toThrow('Encryption is enforced but encrypt/decrypt functions are not provided');
+  }).toThrow('Encryption enforced but encrypt/decrypt not provided.');
 });
 
 test('Security: Enforce encryption passes with both encrypt/decrypt', () => {
@@ -194,7 +194,7 @@ test('Security: Decryption failure with no fallback throws error', async () => {
     security: { allowPlaintextFallback: false }
   });
 
-  expect(adapter.load()).rejects.toThrow('Decryption failed and plaintext fallback is disabled');
+  expect(adapter.load()).rejects.toThrow('Decryption failed, plaintext fallback disabled');
 });
 
 test('Security: Data validation fails on corrupted data', async () => {

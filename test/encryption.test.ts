@@ -100,7 +100,7 @@ test('decrypt throws on non-versioned string', async () => {
   const { decrypt } = createEncryption('test-passphrase');
 
   await expect(decrypt('plain-json-data')).rejects.toThrow(
-    'Failed to parse encrypted payload',
+    'Invalid encrypted payload',
   );
 });
 
@@ -108,7 +108,7 @@ test('decrypt throws on plain base64 without version', async () => {
   const { decrypt } = createEncryption('test-passphrase');
 
   await expect(decrypt(btoa('some-data'))).rejects.toThrow(
-    'Failed to parse encrypted payload',
+    'Invalid encrypted payload',
   );
 });
 
@@ -157,7 +157,7 @@ test('key rotation: old passphrase removed — old data fails, new data works', 
 
   // Old data should fail
   await expect(current.decrypt(encryptedV1)).rejects.toThrow(
-    'Unknown key version: 1',
+    'Unknown key version 1',
   );
 });
 
@@ -166,7 +166,7 @@ test('key rotation: old passphrase removed — old data fails, new data works', 
 test('throws when no passphrase for active version', () => {
   expect(() =>
     createEncryption({ 2: 'some-passphrase' }, { version: 1 }),
-  ).toThrow('No passphrase configured for version 1');
+  ).toThrow('No passphrase for version 1');
 });
 
 test('throws when version is not a positive integer', () => {
@@ -190,7 +190,7 @@ test('warns on low iteration count', () => {
 
   console.warn = original;
 
-  expect(warnings.some((w) => w.includes('[SECURITY WARNING]'))).toBe(true);
+  expect(warnings.some((w) => w.includes('[SECURITY]'))).toBe(true);
   expect(warnings.some((w) => w.includes('PBKDF2'))).toBe(true);
 });
 

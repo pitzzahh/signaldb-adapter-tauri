@@ -520,7 +520,7 @@ describe('Performance Tests', () => {
     console.warn = (...args: any[]) => {
       const message = args.join(' ');
       // Only suppress specific expected warnings
-      if (message.includes('[SECURITY WARNING]') ||
+      if (message.includes('[SECURITY]') ||
         message.includes('Failed to create backup') ||
         message.includes('Incremental update mismatch')) {
         return; // Suppress these expected warnings

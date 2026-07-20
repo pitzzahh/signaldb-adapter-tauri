@@ -2,12 +2,8 @@ export type EncryptFunction<T> = (data: T[]) => Promise<string>;
 export type DecryptFunction<T> = (encrypted: string) => Promise<T[]>;
 
 /**
- * Structure of encrypted data produced by the built-in {@link createEncryption} utility.
- *
- * If you provide your own encrypt/decrypt functions you are not bound to this
- * format — it only describes what the built-in utility writes.
- *
- * On-disk format: `v{version}:{base64(salt || iv || ciphertext+authTag)}`
+ * Structure of encrypted data from the built-in `createEncryption`.
+ * On-disk: `v{version}:{base64(salt || iv || ciphertext+authTag)}`.
  */
 export interface EncryptedPayload {
   /** Key version number for key rotation support */
@@ -17,19 +13,19 @@ export interface EncryptedPayload {
 }
 
 export interface SecurityOptions {
-  /** Whether to enforce encryption (throw error if encrypt/decrypt not provided) */
+  /** Enforce encryption (throw if encrypt/decrypt not provided) */
   enforceEncryption: boolean;
-  /** Whether to allow fallback to plaintext on decryption failure */
+  /** Allow fallback to plaintext on decryption failure */
   allowPlaintextFallback: boolean;
-  /** Whether to validate decrypted data structure */
+  /** Validate decrypted data structure */
   validateDecryptedData: boolean;
   /** Whether callback errors should propagate */
   propagateCallbackErrors: boolean;
   /** Custom data validator function */
   dataValidator: <T>(data: unknown) => data is T[];
-  /** Whether to create backup files on save (default: false for sync scenarios) */
+  /** Create backup files on save (default: false) */
   createBackups: boolean;
-  /** Maximum number of backup files to keep (default: 5) */
+  /** Max backup files to keep (default: 5) */
   maxBackups: number;
 }
 
@@ -46,31 +42,21 @@ export interface AdapterOptions<T> {
 export interface EncryptionOptions {
   /**
    * Key version number for key rotation support.
-   *
-   * When encrypting, this version is embedded in the payload.
-   * When decrypting, the version from the payload determines which
-   * passphrase from the map is used.
-   *
    * @default 1
    */
   version?: number;
 
   /**
    * Number of PBKDF2 iterations.
-   *
-   * Higher = more resistant to brute-force, but slower.
-   * OWASP 2025 recommends 100,000 for SHA-256 in PBKDF2.
-   *
+   * OWASP 2025 recommends >=100,000 for SHA-256.
    * @default 100_000
    */
   iterations?: number;
 }
 
 /**
- * Result of {@link createEncryption}.
- *
- * The returned `encrypt` and `decrypt` are drop-in compatible with
- * `createTauriFileSystemAdapter`'s `encrypt`/`decrypt` options.
+ * Result of `createEncryption`. Compatible with the adapter's
+ * `encrypt`/`decrypt` options.
  */
 export interface EncryptionPair {
   encrypt: EncryptFunction<unknown>;
