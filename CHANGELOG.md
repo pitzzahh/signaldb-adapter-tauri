@@ -16,6 +16,7 @@
 ### Added
 - Comprehensive regression test suite (`test/regression.test.ts`)
 - 33 new edge case tests (`test/edge-cases.test.ts`) covering Unicode, optional fields, encryption, callbacks, lifecycle, null/undefined changes, deeply nested data, and more.
+- **Bundle size reduction**: Marked peer dependencies as external in build, reducing unpacked size from 23.5 kB → 19.0 kB (gzipped 7.1 kB).
 
 ## [2.1.6] - 2025-07-08
 
