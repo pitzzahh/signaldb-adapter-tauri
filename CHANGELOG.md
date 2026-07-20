@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.1] — CI & trusted publishing
+
+### Changed
+- Switched to npm Trusted Publishing (OIDC) — no more `NPM_TOKEN` secret
+- Bumped `actions/checkout` to v7, `actions/setup-node` to v7, `action-gh-release` to v3 for Node 24 runtime
+- Test workflow: cancel-in-progress, draft PRs trigger on ready-for-review, added `permissions`
+- Auto-create GitHub Release from changelog entry on version bump
+
 ## [2.2.0] — Atomic writes & data safety
 
 ### Fixed
