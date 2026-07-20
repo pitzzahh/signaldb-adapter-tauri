@@ -67,8 +67,22 @@ test('decrypt throws on tampered data', async () => {
 
   const encrypted = await encrypt([{ id: '1' }]);
 
-  // Tamper: flip a character in the base64 payload
-  const tampered = encrypted.slice(0, -2) + (encrypted[encrypted.length - 2] === 'A' ? 'B' : 'A') + encrypted.slice(-1);
+  // Tamper: decode the binary payload, flip a byte in the auth tag, re-encode.
+  // This guarantees AES-GCM authentication will fail, regardless of atob/btoa quirks.
+  const sep = encrypted.indexOf(':');
+  const version = encrypted.slice(0, sep);
+  const b64 = encrypted.slice(sep + 1);
+  const binaryStr = atob(b64);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+  // Flip all bits in the last byte (part of the 16-byte GCM auth tag).
+  // Even a single bit flip is enough — this is extreme overkill.
+  bytes[bytes.length - 1] ^= 0xff;
+
+  let tamperedBinary = '';
+  for (let i = 0; i < bytes.length; i++) tamperedBinary += String.fromCharCode(bytes[i]);
+  const tampered = version + ':' + btoa(tamperedBinary);
 
   await expect(decrypt(tampered)).rejects.toThrow('Decryption failed');
 });
