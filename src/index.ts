@@ -436,5 +436,4 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
 }
 
 export { createEncryption } from './encryption';
-export type { EncryptionOptions, EncryptionPair } from './encryption';
-export type { EncryptFunction, DecryptFunction, EncryptedPayload, SecurityOptions, AdapterOptions } from './types';
+export type { EncryptFunction, DecryptFunction, EncryptedPayload, SecurityOptions, AdapterOptions, EncryptionOptions, EncryptionPair } from './types';

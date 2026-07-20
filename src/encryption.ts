@@ -25,7 +25,7 @@
  *   if you keep the old passphrase in the map.
  */
 
-import type { EncryptFunction, DecryptFunction } from './types';
+import type { EncryptFunction, DecryptFunction, EncryptionOptions, EncryptionPair } from './types';
 
 /** Salt length in bytes (128 bits) */
 const SALT_LENGTH = 16;
@@ -41,43 +41,6 @@ const VERSION_SEPARATOR = ':';
 
 /** Prefix marker for versioned payloads */
 const VERSION_PREFIX = 'v';
-
-// ─── Public types ───────────────────────────────────────────────────────
-
-/** Options for {@link createEncryption}. */
-export interface EncryptionOptions {
-  /**
-   * Key version number for key rotation support.
-   *
-   * When encrypting, this version is embedded in the payload.
-   * When decrypting, the version from the payload determines which
-   * passphrase from the map is used.
-   *
-   * @default 1
-   */
-  version?: number;
-
-  /**
-   * Number of PBKDF2 iterations.
-   *
-   * Higher = more resistant to brute-force, but slower.
-   * OWASP 2025 recommends 100,000 for SHA-256 in PBKDF2.
-   *
-   * @default 100_000
-   */
-  iterations?: number;
-}
-
-/**
- * Result of {@link createEncryption}.
- *
- * The returned `encrypt` and `decrypt` are drop-in compatible with
- * `createTauriFileSystemAdapter`'s `encrypt`/`decrypt` options.
- */
-export interface EncryptionPair {
-  encrypt: EncryptFunction<unknown>;
-  decrypt: DecryptFunction<unknown>;
-}
 
 // ─── Internal helpers ───────────────────────────────────────────────────
 
