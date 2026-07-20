@@ -41,12 +41,38 @@ const mock_remove = mock(async (filename: string, options?: { baseDir?: BaseDire
   mock_file_system.delete(full_path);
 });
 
+const mock_read_dir = mock(async (path: string, options?: { baseDir?: BaseDirectory }) => {
+  const base_dir = options?.baseDir || BaseDirectory.AppLocalData;
+  const prefix = `${base_dir}/`;
+  const entries: Array<{ name: string; isDirectory: boolean; isFile: boolean; isSymlink: boolean }> = [];
+  for (const [full_path] of mock_file_system) {
+    if (full_path.startsWith(prefix)) {
+      const name = full_path.slice(prefix.length);
+      entries.push({ name, isDirectory: false, isFile: true, isSymlink: false });
+    }
+  }
+  return entries;
+});
+
+const mock_rename_fn = mock(async (oldPath: string, newPath: string, options?: { oldPathBaseDir?: BaseDirectory; newPathBaseDir?: BaseDirectory }) => {
+  const old_base = options?.oldPathBaseDir || BaseDirectory.AppLocalData;
+  const new_base = options?.newPathBaseDir || BaseDirectory.AppLocalData;
+  const old_full = `${old_base}/${oldPath}`;
+  const new_full = `${new_base}/${newPath}`;
+  const content = mock_file_system.get(old_full);
+  if (!content) throw new Error(`File not found: ${oldPath}`);
+  mock_file_system.set(new_full, content);
+  mock_file_system.delete(old_full);
+});
+
 // Mock the Tauri fs plugin
 mock.module('@tauri-apps/plugin-fs', () => ({
   exists: mock_exists,
   readFile: mock_read_file,
+  readDir: mock_read_dir,
   writeFile: mock_write_file,
   remove: mock_remove,
+  rename: mock_rename_fn,
   open: mock(async () => ({ write: mock(), close: mock(), truncate: mock() })),
   BaseDirectory: {
     AppLocalData: 'AppLocalData',
@@ -63,6 +89,8 @@ beforeEach(() => {
   mock_read_file.mockClear();
   mock_write_file.mockClear();
   mock_remove.mockClear();
+  mock_read_dir.mockClear();
+  mock_rename_fn.mockClear();
 
   // Suppress non-critical warnings for cleaner test output
   originalConsoleWarn = console.warn;
@@ -166,7 +194,7 @@ test('Security: Decryption failure with no fallback throws error', async () => {
     security: { allowPlaintextFallback: false }
   });
 
-  await expect(adapter.load()).rejects.toThrow('Decryption failed and plaintext fallback is disabled');
+  expect(adapter.load()).rejects.toThrow('Decryption failed and plaintext fallback is disabled');
 });
 
 test('Security: Data validation fails on corrupted data', async () => {
@@ -195,7 +223,7 @@ test('Security: Data validation fails on corrupted data', async () => {
     }
   });
 
-  await expect(adapter.load()).rejects.toThrow('Data failed validation');
+  expect(adapter.load()).rejects.toThrow('Data failed validation');
 });
 
 test('Security: Callback errors propagate when enabled', async () => {
@@ -211,7 +239,7 @@ test('Security: Callback errors propagate when enabled', async () => {
 
   const test_data: TestData[] = [{ id: '1', name: 'test', value: 42 }];
 
-  await expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] }))
+  expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] }))
     .rejects.toThrow('Change callback failed');
 });
 

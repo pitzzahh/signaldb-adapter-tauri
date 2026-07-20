@@ -6,9 +6,11 @@ import {
 import {
   BaseDirectory,
   exists,
+  readDir,
   readFile,
   writeFile,
-  remove
+  remove,
+  rename
 } from '@tauri-apps/plugin-fs';
 import { SecurityOptions, AdapterOptions } from './types';
 
@@ -44,11 +46,11 @@ function defaultDataValidator<T>(data: unknown): data is T[] {
 }
 
 /**
- * Creates a backup filename with timestamp
+ * Creates a backup filename with unique identifier
  */
 function createBackupFilename(filename: string): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  return `${filename}.backup.${timestamp}`;
+  return `${filename}.backup.${timestamp}.${crypto.randomUUID()}`;
 }
 
 /**
@@ -57,13 +59,23 @@ function createBackupFilename(filename: string): string {
 async function cleanupOldBackups(
   filename: string,
   maxBackups: number,
-  baseDir: import('@tauri-apps/plugin-fs').BaseDirectory
+  baseDir: BaseDirectory
 ): Promise<void> {
   try {
-    // This is a simplified implementation - in a real scenario, you'd want to
-    // list all files in the directory and filter for backup files
-    // For now, we'll just log that cleanup would happen
-    console.debug(`Backup cleanup for ${filename} - keeping max ${maxBackups} backups`);
+    const entries = await readDir('.', { baseDir });
+    const backup_pattern = `${filename}.backup.`;
+    const backup_entries = entries
+      .filter(entry => entry.name.startsWith(backup_pattern))
+      .sort((a, b) => b.name.localeCompare(a.name)); // newest first (ISO timestamps sort lexicographically)
+
+    // Remove oldest backups beyond the limit
+    for (let i = maxBackups; i < backup_entries.length; i++) {
+      try {
+        await remove(backup_entries[i].name, { baseDir });
+      } catch (removeError) {
+        console.warn(`Failed to remove old backup ${backup_entries[i].name}:`, removeError);
+      }
+    }
   } catch (error) {
     console.warn(`Failed to cleanup old backups for ${filename}:`, error);
   }
@@ -178,8 +190,12 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
         try {
           contents = await readFile(filename, { baseDir: base_dir });
         } catch (error) {
-          // File doesn't exist or can't be read
-          return { items: [] };
+          const msg = error instanceof Error ? error.message : String(error);
+          // Only return empty if the file truly doesn't exist
+          if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('no such file')) {
+            return { items: [] };
+          }
+          throw error; // Re-throw I/O errors, permission errors, etc.
         }
 
         const text_content = new TextDecoder().decode(contents);
@@ -295,8 +311,11 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
             }
           }
         } catch (error) {
-          console.warn('Could not load current data, starting with empty array:', error);
-          current_items = [];
+          throw new Error(
+            `Failed to load current data for ${filename} during save. ` +
+            'Refusing to save to prevent data loss.',
+            { cause: error }
+          );
         }
 
         // Apply changes incrementally
@@ -345,7 +364,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
         }
 
         // Use atomic write pattern: write to temporary file first
-        const temp_filename = `${filename}.tmp.${Date.now()}`;
+        const temp_filename = `${filename}.tmp.${crypto.randomUUID()}`;
 
         try {
           // Write to temporary file
@@ -353,7 +372,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
             baseDir: base_dir
           });
 
-          // Verify the temporary file was written correctly (if possible)
+          // Verify the temporary file was written correctly
           try {
             const temp_contents = await readFile(temp_filename, { baseDir: base_dir });
             const temp_text = new TextDecoder().decode(temp_contents);
@@ -365,31 +384,12 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
             console.warn(`Failed to verify temporary file ${temp_filename}:`, verifyError);
           }
 
-          // Remove old file if it exists and replace with new one
-          // This is the closest we can get to atomic operation in Tauri
-          try {
-            const oldExists = await exists(filename, { baseDir: base_dir });
-            if (oldExists) {
-              await remove(filename, { baseDir: base_dir });
-            }
-          } catch (removeError) {
-            console.warn(`Failed to remove old file ${filename}:`, removeError);
-          }
-
-          // Write the final file
-          await writeFile(filename, new TextEncoder().encode(data_to_save), {
-            baseDir: base_dir
+          // Atomically replace the old file with the new one using rename
+          // rename is atomic on most filesystems (unlike remove + write)
+          await rename(temp_filename, filename, {
+            oldPathBaseDir: base_dir,
+            newPathBaseDir: base_dir
           });
-
-          // Clean up temp file
-          try {
-            const tempExists = await exists(temp_filename, { baseDir: base_dir });
-            if (tempExists) {
-              await remove(temp_filename, { baseDir: base_dir });
-            }
-          } catch (cleanupError) {
-            console.warn(`Failed to cleanup temp file ${temp_filename}:`, cleanupError);
-          }
 
         } catch (writeError) {
           // Clean up temp file on error
@@ -419,9 +419,9 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
           }
         }
       } catch (error) {
-        // Re-throw callback errors if they should propagate
+        // Re-throw specific errors without wrapping
         const errorMsg = error instanceof Error ? error.message : String(error);
-        if (errorMsg.includes('Change callback failed')) {
+        if (errorMsg.includes('Change callback failed') || errorMsg.includes('Refusing to save')) {
           throw error;
         }
         throw new Error(`Failed to save data to ${filename}`, { cause: error });
