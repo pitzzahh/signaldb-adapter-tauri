@@ -1,6 +1,21 @@
 export type EncryptFunction<T> = (data: T[]) => Promise<string>;
 export type DecryptFunction<T> = (encrypted: string) => Promise<T[]>;
 
+/**
+ * Structure of encrypted data produced by the built-in {@link createEncryption} utility.
+ *
+ * If you provide your own encrypt/decrypt functions you are not bound to this
+ * format — it only describes what the built-in utility writes.
+ *
+ * On-disk format: `v{version}:{base64(salt || iv || ciphertext+authTag)}`
+ */
+export interface EncryptedPayload {
+  /** Key version number for key rotation support */
+  version: number;
+  /** Binary payload: salt (16B) + IV (12B) + AES-256-GCM ciphertext + auth tag */
+  payload: Uint8Array;
+}
+
 export interface SecurityOptions {
   /** Whether to enforce encryption (throw error if encrypt/decrypt not provided) */
   enforceEncryption: boolean;

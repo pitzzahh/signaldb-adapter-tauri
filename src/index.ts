@@ -83,7 +83,7 @@ async function cleanupOldBackups(
 
 /**
  * Creates a persistence adapter for SignalDB that uses Tauri's filesystem API.
- * 
+ *
  * Features:
  * - Automatic file creation and initialization
  * - Optional encryption/decryption support with security validation
@@ -93,7 +93,7 @@ async function cleanupOldBackups(
  * - Graceful error handling and recovery
  * - Security hardening against common attacks
  * - Optional backup creation (disabled by default for sync scenarios)
- * 
+ *
  * @template T - The type of items to store, must have an ID field and can contain other properties
  * @template ID - The type of the ID field, defaults to string
  * @param {string} filename - The name of the file to store data in (sanitized for security)
@@ -435,4 +435,6 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
   }) as PersistenceAdapter<T, ID>;
 }
 
-export type { EncryptFunction, DecryptFunction, SecurityOptions, AdapterOptions } from './types';
+export { createEncryption } from './encryption';
+export type { EncryptionOptions, EncryptionPair } from './encryption';
+export type { EncryptFunction, DecryptFunction, EncryptedPayload, SecurityOptions, AdapterOptions } from './types';
