@@ -34,13 +34,39 @@ const mock_remove = mock(async (filename: string, options?: { baseDir?: BaseDire
   mock_file_system.delete(full_path);
 });
 
+const mock_read_dir = mock(async (path: string, options?: { baseDir?: BaseDirectory }) => {
+  const base_dir = options?.baseDir || BaseDirectory.AppLocalData;
+  const prefix = `${base_dir}/`;
+  const entries: Array<{ name: string; isDirectory: boolean; isFile: boolean; isSymlink: boolean }> = [];
+  for (const [full_path] of mock_file_system) {
+    if (full_path.startsWith(prefix)) {
+      const name = full_path.slice(prefix.length);
+      entries.push({ name, isDirectory: false, isFile: true, isSymlink: false });
+    }
+  }
+  return entries;
+});
+
+const mock_rename_fn = mock(async (oldPath: string, newPath: string, options?: { oldPathBaseDir?: BaseDirectory; newPathBaseDir?: BaseDirectory }) => {
+  const old_base = options?.oldPathBaseDir || BaseDirectory.AppLocalData;
+  const new_base = options?.newPathBaseDir || BaseDirectory.AppLocalData;
+  const old_full = `${old_base}/${oldPath}`;
+  const new_full = `${new_base}/${newPath}`;
+  const content = mock_file_system.get(old_full);
+  if (!content) throw new Error(`File not found: ${oldPath}`);
+  mock_file_system.set(new_full, content);
+  mock_file_system.delete(old_full);
+});
+
 // Mock the Tauri filesystem module
 mock.module('@tauri-apps/plugin-fs', () => ({
   BaseDirectory,
   exists: mock_exists,
   readFile: mock_read_file,
+  readDir: mock_read_dir,
   writeFile: mock_write_file,
-  remove: mock_remove
+  remove: mock_remove,
+  rename: mock_rename_fn
 }));
 
 // Now import our adapter after mocking
