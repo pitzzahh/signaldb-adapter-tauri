@@ -73,7 +73,7 @@ mock.module('@tauri-apps/plugin-fs', () => ({
   open: mock(async () => ({ write: mock(), close: mock(), truncate: mock() })),
 }));
 
-const { adapter } = await import('../src/index');
+const { adapter: createAdapter } = await import('../src/index');
 
 // Helpers
 function readFile(filename: string, baseDir = BaseDirectory.AppLocalData): string {
@@ -115,13 +115,13 @@ afterEach(() => {
 // ═══════════════════════════════════════════
 
 test('Register with non-existent base directory still works (Tauri creates it)', async () => {
-  const adapter = adapter<TestData>('fresh.json');
+  const adapter = createAdapter<TestData>('fresh.json');
   await adapter.register(mock());
   expect(fileExists('fresh.json')).toBe(true);
 });
 
 test('Register twice with same adapter is idempotent', async () => {
-  const adapter = adapter<TestData>('double.json');
+  const adapter = createAdapter<TestData>('double.json');
   await adapter.register(mock());
   const after_first = readFile('double.json');
 
@@ -132,7 +132,7 @@ test('Register twice with same adapter is idempotent', async () => {
 });
 
 test('Register then load immediately returns empty array', async () => {
-  const adapter = adapter<TestData>('empty-check.json');
+  const adapter = createAdapter<TestData>('empty-check.json');
   await adapter.register(mock());
   const result = await adapter.load();
   expect(result.items).toEqual([]);
@@ -140,7 +140,7 @@ test('Register then load immediately returns empty array', async () => {
 
 test('Register does not call callback when file is empty', async () => {
   let called = false;
-  const adapter = adapter<TestData>('no-callback.json');
+  const adapter = createAdapter<TestData>('no-callback.json');
   await adapter.register(() => { called = true; });
   expect(called).toBe(false);
 });
@@ -150,7 +150,7 @@ test('Register does not call callback when file is empty', async () => {
 // ═══════════════════════════════════════════
 
 test('Load without register returns empty array gracefully', async () => {
-  const adapter = adapter<TestData>('unregistered.json');
+  const adapter = createAdapter<TestData>('unregistered.json');
   const result = await adapter.load();
   expect(result.items).toEqual([]);
 });
@@ -160,7 +160,7 @@ test('Load with only whitespace in file returns empty', async () => {
     `${BaseDirectory.AppLocalData}/whitespace.json`,
     new TextEncoder().encode('   \n\t  ')
   );
-  const adapter = adapter<TestData>('whitespace.json');
+  const adapter = createAdapter<TestData>('whitespace.json');
   const result = await adapter.load();
   expect(result.items).toEqual([]);
 });
@@ -171,7 +171,7 @@ test('Load file with a single item', async () => {
     `${BaseDirectory.AppLocalData}/single.json`,
     new TextEncoder().encode(JSON.stringify([item]))
   );
-  const adapter = adapter<TestData>('single.json');
+  const adapter = createAdapter<TestData>('single.json');
   const result = await adapter.load();
   expect(result.items).toEqual([item]);
 });
@@ -186,7 +186,7 @@ test('Load file with many items', async () => {
     `${BaseDirectory.AppLocalData}/many.json`,
     new TextEncoder().encode(JSON.stringify(items))
   );
-  const adapter = adapter<TestData>('many.json');
+  const adapter = createAdapter<TestData>('many.json');
   const result = await adapter.load();
   expect(result.items).toEqual(items);
   expect(result.items!.length).toBe(1000);
@@ -197,7 +197,7 @@ test('Load file with many items', async () => {
 // ═══════════════════════════════════════════
 
 test('Save with only modified items (no added/removed)', async () => {
-  const adapter = adapter<TestData>('mod-only.json');
+  const adapter = createAdapter<TestData>('mod-only.json');
   await adapter.register(mock());
 
   // Seed data
@@ -222,7 +222,7 @@ test('Save with only modified items (no added/removed)', async () => {
 });
 
 test('Save with only removed items (no added/modified)', async () => {
-  const adapter = adapter<TestData>('rem-only.json');
+  const adapter = createAdapter<TestData>('rem-only.json');
   await adapter.register(mock());
 
   const initial: TestData[] = [
@@ -244,7 +244,7 @@ test('Save with only removed items (no added/modified)', async () => {
 });
 
 test('Save all three change types simultaneously', async () => {
-  const adapter = adapter<TestData>('all-changes.json');
+  const adapter = createAdapter<TestData>('all-changes.json');
   await adapter.register(mock());
 
   const initial: TestData[] = [
@@ -270,7 +270,7 @@ test('Save all three change types simultaneously', async () => {
 });
 
 test('Removing a non-existent item is a no-op', async () => {
-  const adapter = adapter<TestData>('remove-non-existent.json');
+  const adapter = createAdapter<TestData>('remove-non-existent.json');
   await adapter.register(mock());
 
   const initial: TestData[] = [{ id: '1', name: 'only', value: 1 }];
@@ -288,7 +288,7 @@ test('Removing a non-existent item is a no-op', async () => {
 });
 
 test('Modifying a non-existent item is ignored', async () => {
-  const adapter = adapter<TestData>('mod-non-existent.json');
+  const adapter = createAdapter<TestData>('mod-non-existent.json');
   await adapter.register(mock());
 
   const initial: TestData[] = [{ id: '1', name: 'only', value: 1 }];
@@ -315,7 +315,7 @@ test('Modifying a non-existent item is ignored', async () => {
 // ═══════════════════════════════════════════
 
 test('Round-trip data with optional fields', async () => {
-  const adapter = adapter<TestData>('optional.json');
+  const adapter = createAdapter<TestData>('optional.json');
   await adapter.register(mock());
 
   const items: TestData[] = [
@@ -330,7 +330,7 @@ test('Round-trip data with optional fields', async () => {
 });
 
 test('Round-trip data with special characters in strings', async () => {
-  const adapter = adapter<TestData>('special.json');
+  const adapter = createAdapter<TestData>('special.json');
   await adapter.register(mock());
 
   const items: TestData[] = [
@@ -353,7 +353,7 @@ interface DeepData {
 }
 
 test('Round-trip deeply nested JSON structures', async () => {
-  const adapter = adapter<DeepData>('deep.json');
+  const adapter = createAdapter<DeepData>('deep.json');
   await adapter.register(mock());
 
   const deep: Record<string, any> = {};
@@ -373,7 +373,7 @@ test('Round-trip deeply nested JSON structures', async () => {
 });
 
 test('Large single item with big string payload', async () => {
-  const adapter = adapter<TestData>('big-payload.json');
+  const adapter = createAdapter<TestData>('big-payload.json');
   await adapter.register(mock());
 
   const huge_string = 'x'.repeat(100_000);
@@ -389,7 +389,7 @@ test('Large single item with big string payload', async () => {
 });
 
 test('Zero items save is valid', async () => {
-  const adapter = adapter<TestData>('zero.json');
+  const adapter = createAdapter<TestData>('zero.json');
   await adapter.register(mock());
 
   await adapter.save([], { added: [], modified: [], removed: [] });
@@ -402,7 +402,7 @@ test('Zero items save is valid', async () => {
 // ═══════════════════════════════════════════
 
 test('Encryption round-trip with all edge cases', async () => {
-  const adapter = adapter<TestData>('enc-edge.json', {
+  const adapter = createAdapter<TestData>('enc-edge.json', {
     encrypt: async (data) => btoa(unescape(encodeURIComponent(JSON.stringify(data)))),
     decrypt: async (enc) => JSON.parse(decodeURIComponent(escape(atob(enc)))),
   });
@@ -431,7 +431,7 @@ test('Allow plaintext fallback when decrypt fails', async () => {
     new TextEncoder().encode(JSON.stringify(plain_items))
   );
 
-  const adapter = adapter<TestData>('fallback.json', {
+  const adapter = createAdapter<TestData>('fallback.json', {
     encrypt: async (data) => 'enc:' + JSON.stringify(data),
     decrypt: async (enc) => {
       if (!enc.startsWith('enc:')) throw new Error('Invalid format');
@@ -461,7 +461,7 @@ test('Custom dataValidator rejects invalid shapes', async () => {
     new TextEncoder().encode(JSON.stringify(bad_data))
   );
 
-  const adapter = adapter<TestData>('validate.json', {
+  const adapter = createAdapter<TestData>('validate.json', {
     security: { validateDecryptedData: true, dataValidator: validator },
   });
 
@@ -474,7 +474,7 @@ test('Custom dataValidator rejects invalid shapes', async () => {
 
 test('Unregister then save does not call callback', async () => {
   let call_count = 0;
-  const adapter = adapter<TestData>('unreg-callback.json');
+  const adapter = createAdapter<TestData>('unreg-callback.json');
   await adapter.register(() => { call_count++; });
   await adapter.unregister?.();
 
@@ -492,7 +492,7 @@ test('Register with data already on disk fires callback', async () => {
   );
 
   let callback_data: any = null;
-  const adapter = adapter<TestData>('pre-existing.json');
+  const adapter = createAdapter<TestData>('pre-existing.json');
   await adapter.register((data) => { callback_data = data; });
 
   expect(callback_data).toEqual({ items: existing });
@@ -501,8 +501,8 @@ test('Register with data already on disk fires callback', async () => {
 test('Multiple saves only call callback for registered adapter', async () => {
   let a_calls = 0, b_calls = 0;
 
-  const a = adapter<TestData>('a.json');
-  const b = adapter<TestData>('b.json');
+  const a = createAdapter<TestData>('a.json');
+  const b = createAdapter<TestData>('b.json');
 
   await a.register(() => { a_calls++; });
   await b.register(() => { b_calls++; });
@@ -527,7 +527,7 @@ test('Save without register works (relies on load finding the file)', async () =
     new TextEncoder().encode(JSON.stringify(existing))
   );
 
-  const adapter = adapter<TestData>('no-reg.json');
+  const adapter = createAdapter<TestData>('no-reg.json');
   const new_item: TestData[] = [
     { id: 'x', name: 'updated', value: 1 },
     { id: 'y', name: 'added', value: 2 },
@@ -539,7 +539,7 @@ test('Save without register works (relies on load finding the file)', async () =
 });
 
 test('Save without register on non-existent file creates data', async () => {
-  const adapter = adapter<TestData>('orphan.json');
+  const adapter = createAdapter<TestData>('orphan.json');
   const data: TestData[] = [{ id: 'o', name: 'orphan', value: 1 }];
 
   // load() will return empty since file doesn't exist
@@ -555,7 +555,7 @@ test('Save without register on non-existent file creates data', async () => {
 // ═══════════════════════════════════════════
 
 test('Fallback to full save when changes result in wrong item count', async () => {
-  const adapter = adapter<TestData>('count-mismatch.json');
+  const adapter = createAdapter<TestData>('count-mismatch.json');
   await adapter.register(mock());
 
   const initial: TestData[] = [
@@ -582,7 +582,7 @@ test('Fallback to full save when changes result in wrong item count', async () =
 });
 
 test('Fallback to full save when changes produce wrong IDs', async () => {
-  const adapter = adapter<TestData>('id-mismatch.json');
+  const adapter = createAdapter<TestData>('id-mismatch.json');
   await adapter.register(mock());
 
   const initial: TestData[] = [
@@ -612,8 +612,8 @@ test('Fallback to full save when changes produce wrong IDs', async () => {
 // ═══════════════════════════════════════════
 
 test('Adapters with different filenames are fully isolated', async () => {
-  const a = adapter<TestData>('alpha.json');
-  const b = adapter<TestData>('beta.json');
+  const a = createAdapter<TestData>('alpha.json');
+  const b = createAdapter<TestData>('beta.json');
 
   await a.register(mock());
   await b.register(mock());
@@ -638,7 +638,7 @@ test('Adapters with different filenames are fully isolated', async () => {
 // ═══════════════════════════════════════════
 
 test('Rapid sequential saves maintain data integrity', async () => {
-  const adapter = adapter<TestData>('rapid.json');
+  const adapter = createAdapter<TestData>('rapid.json');
   await adapter.register(mock());
 
   for (let i = 0; i < 50; i++) {
@@ -656,7 +656,7 @@ test('Rapid sequential saves maintain data integrity', async () => {
 // ═══════════════════════════════════════════
 
 test('Save with undefined changes array works', async () => {
-  const adapter = adapter<TestData>('undef-changes.json');
+  const adapter = createAdapter<TestData>('undef-changes.json');
   await adapter.register(mock());
 
   const data: TestData[] = [{ id: '1', name: 'test', value: 1 }];
@@ -668,7 +668,7 @@ test('Save with undefined changes array works', async () => {
 });
 
 test('Save with null changes array works', async () => {
-  const adapter = adapter<TestData>('null-changes.json');
+  const adapter = createAdapter<TestData>('null-changes.json');
   await adapter.register(mock());
 
   const data: TestData[] = [{ id: '1', name: 'test', value: 1 }];
@@ -684,7 +684,7 @@ test('Save with null changes array works', async () => {
 // ═══════════════════════════════════════════
 
 test('Saving replaces file completely, not appends', async () => {
-  const adapter = adapter<TestData>('overwrite.json');
+  const adapter = createAdapter<TestData>('overwrite.json');
   await adapter.register(mock());
 
   // First save with 3 items

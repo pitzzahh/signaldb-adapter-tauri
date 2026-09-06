@@ -95,7 +95,7 @@ mock.module('@tauri-apps/plugin-fs', () => ({
 }));
 
 // Import after mocking
-const { adapter } = await import('../src/index');
+const { adapter: createAdapter } = await import('../src/index');
 
 // Global warning suppression for cleaner test output
 let originalConsoleWarn: typeof console.warn;
@@ -133,7 +133,7 @@ afterEach(() => {
 });
 
 test('Basic adapter functionality', () => {
-  const adapter = adapter<TestData>('test.json');
+  const adapter = createAdapter<TestData>('test.json');
 
   // Test that adapter is created with correct interface
   expect(adapter).toBeDefined();
@@ -148,7 +148,7 @@ test('Basic adapter functionality', () => {
 });
 
 test('Register creates initial empty file in AppLocalData', async () => {
-  const adapter = adapter<TestData>('test.json');
+  const adapter = createAdapter<TestData>('test.json');
   if (!adapter) return;
 
   // Before register, file should not exist
@@ -169,7 +169,7 @@ test('Register creates initial empty file in AppLocalData', async () => {
 });
 
 test('Register does not overwrite existing file', async () => {
-  const adapter = adapter<TestData>('test.json');
+  const adapter = createAdapter<TestData>('test.json');
   if (!adapter) return;
 
   // Pre-populate the mock filesystem with existing data
@@ -189,7 +189,7 @@ test('Register does not overwrite existing file', async () => {
 });
 
 test('Save and load data correctly', async () => {
-  const adapter = adapter<TestData>('users.json');
+  const adapter = createAdapter<TestData>('users.json');
   if (!adapter) return;
 
   const test_data: TestData[] = [
@@ -217,7 +217,7 @@ test('Save and load data correctly', async () => {
 });
 
 test('Uses custom base directory', async () => {
-  const adapter = adapter<TestData>('config.json', {
+  const adapter = createAdapter<TestData>('config.json', {
     base_dir: BaseDirectory.AppConfig
   });
   if (!adapter) return;
@@ -237,7 +237,7 @@ test('Uses custom base directory', async () => {
 });
 
 test('Load handles non-existent file', async () => {
-  const adapter = adapter<TestData>('nonexistent.json');
+  const adapter = createAdapter<TestData>('nonexistent.json');
   if (!adapter) return;
 
   // File should not exist in filesystem
@@ -251,7 +251,7 @@ test('Load handles non-existent file', async () => {
 });
 
 test('Load handles empty file', async () => {
-  const adapter = adapter<TestData>('empty.json');
+  const adapter = createAdapter<TestData>('empty.json');
   if (!adapter) return;
 
   // Create empty file in mock filesystem
@@ -262,7 +262,7 @@ test('Load handles empty file', async () => {
 });
 
 test('Load handles corrupted JSON gracefully', async () => {
-  const adapter = adapter<TestData>('corrupted.json');
+  const adapter = createAdapter<TestData>('corrupted.json');
   if (!adapter) return;
 
   // Create file with invalid JSON in mock filesystem
@@ -273,7 +273,7 @@ test('Load handles corrupted JSON gracefully', async () => {
 });
 
 test('Encryption creates encrypted files', async () => {
-  const adapter = adapter<TestData>('encrypted.json', {
+  const adapter = createAdapter<TestData>('encrypted.json', {
     encrypt: async (data) => btoa(JSON.stringify(data)),
     decrypt: async (encrypted) => JSON.parse(atob(encrypted)),
   });
@@ -305,8 +305,8 @@ test('Encryption creates encrypted files', async () => {
 });
 
 test('Multiple adapters with different files', async () => {
-  const users_adapter = adapter<TestData>('users.json');
-  const settings_adapter = adapter<TestData>('settings.json');
+  const users_adapter = createAdapter<TestData>('users.json');
+  const settings_adapter = createAdapter<TestData>('settings.json');
   if (!users_adapter || !settings_adapter) return;
 
   const user_data: TestData[] = [{ id: '1', name: 'User', value: 1 }];
@@ -339,7 +339,7 @@ test('Multiple adapters with different files', async () => {
 test('Handles save errors gracefully', async () => {
   let should_fail_encryption = false;
 
-  const adapter = adapter<TestData>('test.json', {
+  const adapter = createAdapter<TestData>('test.json', {
     encrypt: async (data) => {
       if (should_fail_encryption) {
         throw new Error('Encryption failed');
@@ -365,7 +365,7 @@ test('Handles save errors gracefully', async () => {
 });
 
 test('Handles register encryption errors gracefully', async () => {
-  const adapter = adapter<TestData>('register-error-test.json', {
+  const adapter = createAdapter<TestData>('register-error-test.json', {
     encrypt: async () => {
       throw new Error('Encryption failed during register');
     },
@@ -389,8 +389,8 @@ function get_mock_file_system_state() {
 }
 
 test('Mock filesystem state inspection', async () => {
-  const adapter_1 = adapter<TestData>('app1.json');
-  const adapter_2 = adapter<TestData>('app2.json', {
+  const adapter_1 = createAdapter<TestData>('app1.json');
+  const adapter_2 = createAdapter<TestData>('app2.json', {
     base_dir: BaseDirectory.AppConfig
   });
   if (!adapter_1 || !adapter_2) return;
@@ -415,7 +415,7 @@ test('Mock filesystem state inspection', async () => {
 });
 
 test('Change callback is called on save', async () => {
-  const adapter = adapter<TestData>('callback-test.json');
+  const adapter = createAdapter<TestData>('callback-test.json');
   if (!adapter) return;
 
   let callback_data: any = null;
@@ -437,7 +437,7 @@ test('Change callback is called on save', async () => {
 });
 
 test('Unregister cleans up properly', async () => {
-  const adapter = adapter<TestData>('unregister-test.json');
+  const adapter = createAdapter<TestData>('unregister-test.json');
   if (!adapter) return;
 
   let callback_called = false;
@@ -468,7 +468,7 @@ test('Initial data callback on register', async () => {
   const existing_data = '[{"id": "1", "name": "existing", "value": 123}]';
   mock_file_system.set(`${BaseDirectory.AppLocalData}/initial-callback-test.json`, new TextEncoder().encode(existing_data));
 
-  const adapter = adapter<TestData>('initial-callback-test.json');
+  const adapter = createAdapter<TestData>('initial-callback-test.json');
   if (!adapter) return;
 
   let callback_data: any = null;
@@ -486,7 +486,7 @@ test('Initial data callback on register', async () => {
 });
 
 test('Save uses incremental changes correctly', async () => {
-  const adapter = adapter<TestData>('incremental-test.json');
+  const adapter = createAdapter<TestData>('incremental-test.json');
   if (!adapter) return;
 
   // Initial data
@@ -524,7 +524,7 @@ test('Save uses incremental changes correctly', async () => {
 });
 
 test('Save handles empty changes gracefully', async () => {
-  const adapter = adapter<TestData>('empty-changes-test.json');
+  const adapter = createAdapter<TestData>('empty-changes-test.json');
   if (!adapter) return;
 
   const test_data: TestData[] = [
@@ -541,7 +541,7 @@ test('Save handles empty changes gracefully', async () => {
 });
 
 test('Save falls back to full save on mismatch', async () => {
-  const adapter = adapter<TestData>('fallback-test.json');
+  const adapter = createAdapter<TestData>('fallback-test.json');
   if (!adapter) return;
 
   // Initial data

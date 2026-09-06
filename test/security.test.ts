@@ -1,6 +1,6 @@
 import { test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { BaseDirectory } from '@tauri-apps/plugin-fs';
-import { adapter } from '../src/index';
+import { adapter as createAdapter } from '../src/index';
 
 // Test data interface
 interface TestData {
@@ -127,7 +127,7 @@ test('Security: Filename validation prevents path traversal', () => {
 
   for (const filename of malicious_filenames) {
     expect(() => {
-      adapter<TestData>(filename);
+      createAdapter<TestData>(filename);
     }).toThrow();
   }
 });
@@ -137,7 +137,7 @@ test('Security: Empty or invalid filename throws error', () => {
 
   for (const filename of invalid_filenames) {
     expect(() => {
-      adapter<TestData>(filename);
+      createAdapter<TestData>(filename);
     }).toThrow('Filename must be a non-empty string');
   }
 });
@@ -147,7 +147,7 @@ test('Security: Warning when no encryption provided', () => {
   const warnings: string[] = [];
   console.warn = (message: string) => warnings.push(message);
 
-  adapter<TestData>('test.json');
+  createAdapter<TestData>('test.json');
 
   expect(warnings.some(w => w.includes('[SECURITY] No encryption for'))).toBe(true);
 
@@ -156,7 +156,7 @@ test('Security: Warning when no encryption provided', () => {
 
 test('Security: Enforce encryption throws when encrypt/decrypt missing', () => {
   expect(() => {
-    adapter<TestData>('test.json', {
+    createAdapter<TestData>('test.json', {
       security: { enforceEncryption: true }
     });
   }).toThrow('Encryption enforced but encrypt/decrypt not provided.');
@@ -167,7 +167,7 @@ test('Security: Enforce encryption passes with both encrypt/decrypt', () => {
   const decrypt = mock(async (data: string) => JSON.parse(data));
 
   expect(() => {
-    adapter<TestData>('test.json', {
+    createAdapter<TestData>('test.json', {
       encrypt,
       decrypt,
       security: { enforceEncryption: true }
@@ -188,7 +188,7 @@ test('Security: Decryption failure with no fallback throws error', async () => {
   const tampered_data = new TextEncoder().encode('tampered_data_not_encrypted');
   mock_file_system.set('AppLocalData/test.json', tampered_data);
 
-  const adapter = adapter<TestData>('test.json', {
+  const adapter = createAdapter<TestData>('test.json', {
     encrypt,
     decrypt,
     security: { allowPlaintextFallback: false }
@@ -216,7 +216,7 @@ test('Security: Data validation fails on corrupted data', async () => {
   ]));
   mock_file_system.set('AppLocalData/test.json', corrupted_data);
 
-  const adapter = adapter<TestData>('test.json', {
+  const adapter = createAdapter<TestData>('test.json', {
     security: {
       validateDecryptedData: true,
       dataValidator
@@ -231,7 +231,7 @@ test('Security: Callback errors propagate when enabled', async () => {
     throw new Error('Callback failed');
   });
 
-  const adapter = adapter<TestData>('test.json', {
+  const adapter = createAdapter<TestData>('test.json', {
     security: { propagateCallbackErrors: true }
   });
 
@@ -252,7 +252,7 @@ test('Security: Callback errors are silenced when disabled', async () => {
     throw new Error('Callback failed');
   });
 
-  const adapter = adapter<TestData>('test.json', {
+  const adapter = createAdapter<TestData>('test.json', {
     security: { propagateCallbackErrors: false }
   });
 
@@ -275,7 +275,7 @@ test('Security: Backup files are created on save when enabled', async () => {
   ]));
   mock_file_system.set('AppLocalData/test.json', existing_data);
 
-  const adapter = adapter<TestData>('test.json', {
+  const adapter = createAdapter<TestData>('test.json', {
     security: { createBackups: true }
   });
   await adapter.register(mock());
@@ -298,7 +298,7 @@ test('Security: Backup files are NOT created by default (for sync scenarios)', a
   ]));
   mock_file_system.set('AppLocalData/test.json', existing_data);
 
-  const adapter = adapter<TestData>('test.json');
+  const adapter = createAdapter<TestData>('test.json');
   await adapter.register(mock());
 
   const new_data: TestData[] = [{ id: '2', name: 'new', value: 2 }];
@@ -313,7 +313,7 @@ test('Security: Backup files are NOT created by default (for sync scenarios)', a
 });
 
 test('Security: Temporary files are cleaned up on successful write', async () => {
-  const adapter = adapter<TestData>('test.json');
+  const adapter = createAdapter<TestData>('test.json');
   await adapter.register(mock());
 
   const test_data: TestData[] = [{ id: '1', name: 'test', value: 42 }];
@@ -337,7 +337,7 @@ test('Security: Data cloning prevents callback mutation', async () => {
     }
   });
 
-  const adapter = adapter<TestData>('test.json');
+  const adapter = createAdapter<TestData>('test.json');
   await adapter.register(callback);
 
   const original_data: TestData[] = [{ id: '1', name: 'test', value: 42 }];
@@ -351,7 +351,7 @@ test('Security: Data cloning prevents callback mutation', async () => {
 
 test('Security: Race condition prevention in file operations', async () => {
   // This test simulates rapid concurrent access
-  const adapter = adapter<TestData>('test.json');
+  const adapter = createAdapter<TestData>('test.json');
   await adapter.register(mock());
 
   const operations: Promise<void>[] = [];
