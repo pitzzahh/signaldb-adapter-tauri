@@ -1,69 +1,79 @@
-# @pitzzahh/signaldb-adapter-tauri
+# signaldb-adapter-tauri
 
 [![npm version](https://img.shields.io/npm/v/@pitzzahh/signaldb-adapter-tauri?logo=npm)](https://www.npmjs.com/package/@pitzzahh/signaldb-adapter-tauri)
 [![Test](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml/badge.svg)](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A simple and reliable persistence adapter for [SignalDB](https://github.com/maxnowack/signaldb) in Tauri applications. Persist your reactive data collections to the local filesystem with built-in AES-256-GCM encryption — recommended for all production apps.
+Filesystem persistence for [SignalDB](https://github.com/maxnowack/signaldb) in Tauri apps. One line per collection, with optional AES-256-GCM encryption.
 
-## ✨ Features
+8.5 KB minified. Zero runtime dependencies.
 
-- 🚀 **Zero Configuration** - Works out of the box with sensible defaults
-- 💾 **Native Tauri Integration** - Uses Tauri's secure filesystem API
-- 🔐 **Built-in Encryption** — AES-256-GCM via `createEncryption()`. Also supports custom encrypt/decrypt functions.
-- 📱 **Cross-Platform** - Works on Windows, macOS, and Linux
-- 🎯 **Type Safe** - Full TypeScript support with comprehensive type definitions
-- ⚡ **Zero Dependencies** - No runtime dependencies, maximum performance
-- 🔄 **Auto-Recovery** - Graceful handling of corrupted or missing files
-
-## 📦 Installation
-
-Install the package using your preferred package manager:
+## Install
 
 ```bash
 npm install @pitzzahh/signaldb-adapter-tauri
 ```
-```bash
-yarn add @pitzzahh/signaldb-adapter-tauri
-```
-```bash
-pnpm add @pitzzahh/signaldb-adapter-tauri
-```
+
 ```bash
 bun add @pitzzahh/signaldb-adapter-tauri
 ```
 
-## 🚀 Quick Start
+Peer dependencies (already in your Tauri + SignalDB project):
 
-### Basic Usage
+- `@signaldb/core` 1.x
+- `@tauri-apps/api` 2.x
+- `@tauri-apps/plugin-fs` 2.x
+
+## Quick start
 
 ```typescript
 import { Collection } from '@signaldb/core';
 import { createTauriFileSystemAdapter } from '@pitzzahh/signaldb-adapter-tauri';
 
-// Create a collection with filesystem persistence
 const users = new Collection({
   name: 'users',
   persistence: createTauriFileSystemAdapter('users.json')
 });
 
-// Your data is now automatically persisted to the filesystem!
 users.insert({ name: 'John Doe', email: 'john@example.com' });
 ```
 
-> ⚠️ **Production apps should use encryption.** The example above stores data in plaintext. See [With Encryption](#with-encryption) below to enable built-in AES-256-GCM encryption in one line.
+That stores plaintext. For anything beyond throwaway local state, add encryption from the next section.
 
-> 📖 **Need more examples?** Check out our [Usage Examples](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Usage%E2%80%90Examples) in the wiki.
+## Tauri setup: grant filesystem access
 
-### With Encryption
+Tauri v2 denies fs access by default, so allow it in a capability file such as `src-tauri/capabilities/default.json`:
 
-Use the built-in AES-256-GCM encryption (recommended):
+```json
+{
+  "identifier": "main-capability",
+  "windows": ["main"],
+  "permissions": [
+    "fs:allow-exists",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-remove",
+    "fs:allow-rename",
+    "fs:allow-read-dir",
+    {
+      "identifier": "fs:scope",
+      "allow": ["$APPLOCALDATA/*"]
+    }
+  ]
+}
+```
+
+Without these, every read and write fails with a permission error. Keep the scope tight (`$APPLOCALDATA/*`) so the adapter can only touch its own directory. Check the [fs plugin docs](https://tauri.app/plugin/file-system/) if permission names changed since this was written.
+
+## Encryption
 
 ```typescript
-import { createEncryption } from '@pitzzahh/signaldb-adapter-tauri';
+import {
+  createEncryption,
+  createTauriFileSystemAdapter
+} from '@pitzzahh/signaldb-adapter-tauri';
 
-// AES-256-GCM authenticated encryption with PBKDF2 key derivation
-const { encrypt, decrypt } = createEncryption('your-strong-passphrase');
+const { encrypt, decrypt } = createEncryption('user-supplied-passphrase');
 
 const adapter = createTauriFileSystemAdapter('secure-data.json', {
   encrypt,
@@ -72,43 +82,36 @@ const adapter = createTauriFileSystemAdapter('secure-data.json', {
 });
 ```
 
-Or bring your own encryption functions with full control over the algorithm:
+`createEncryption` uses AES-256-GCM with PBKDF2 key derivation (100k iterations by default, configurable). Each write gets a fresh salt and IV, so identical data never produces identical files. Tampered files fail decryption instead of loading garbage.
+
+Key rotation uses versioned passphrases. Old versions keep decrypting legacy files while new writes use the current key:
 
 ```typescript
-const adapter = createTauriFileSystemAdapter('secure-data.json', {
-  encrypt: async (data) => yourCustomEncrypt(data),
-  decrypt: async (data) => yourCustomDecrypt(data)
-});
+const { encrypt, decrypt } = createEncryption(
+  { 1: 'old-passphrase', 2: 'new-passphrase' },
+  { version: 2 }
+);
 ```
 
-> 🔐 **Need key rotation?** `createEncryption` supports versioned passphrases. See our [Security Guide](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Security%E2%80%90Guide) for production-ready examples.
+One honest warning: encryption only helps if the key is not sitting next to the data. Do not hardcode the passphrase. Prompt the user for it or keep it in the OS keychain (for example via `tauri-plugin-stronghold`). You can also bring your own `encrypt`/`decrypt` functions if you already have a key management story.
 
-### With Custom Base Directory
+## Behavior worth knowing
 
-```typescript
-import { BaseDirectory } from '@tauri-apps/plugin-fs';
+- **Atomic writes.** Each save goes to a temp file, then renames over the original. A crash mid-write leaves the previous version intact.
+- **Serialized saves.** Concurrent `save()` calls run in order through a queue, so they cannot interleave read-modify-write and drop updates.
+- **Missing files start empty.** A corrupt plaintext file loads as empty with a loud console warning. Encrypted files fail loudly instead of guessing.
+- **Flat filenames only.** No paths, no `..`, no reserved device names (`CON`, `NUL`, ...). One file per collection, in one base directory.
+- **Backups are off by default.** Frequent sync writes would pile up backup files, so set `security.createBackups: true` only if you want timestamped copies before each save.
+- **Passing validation is on by default.** Decrypted data must be an array unless you supply a custom `dataValidator` or disable the check.
 
-const adapter = createTauriFileSystemAdapter('app-data.json', {
-  base_dir: BaseDirectory.AppConfig
-});
-```
-
-> 📁 **Learn about all storage options:** [Storage Configuration](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Storage%E2%80%90Configuration)
-
-##  API Reference
+## API
 
 ### `createTauriFileSystemAdapter(filename, options?)`
 
-Creates a new persistence adapter instance.
-
-#### Parameters
-
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `filename` | `string` | ✅ | Name of the file to store data in |
-| `options` | `AdapterOptions` | ❌ | Configuration options |
-
-#### Options
+| `filename` | `string` | yes | File to store data in. Flat name, no paths |
+| `options` | `AdapterOptions` | no | Configuration options |
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -117,26 +120,24 @@ Creates a new persistence adapter instance.
 | `decrypt` | `DecryptFunction<T>` | `undefined` | Custom decryption function |
 | `security` | `Partial<SecurityOptions>` | `{}` | Security configuration options |
 
-#### Type Definitions
-
 ```typescript
 export type EncryptFunction<T> = (data: T[]) => Promise<string>;
 export type DecryptFunction<T> = (encrypted: string) => Promise<T[]>;
 
 export interface SecurityOptions {
-  /** Whether to enforce encryption (throw error if encrypt/decrypt not provided) */
+  /** Throw if encrypt/decrypt are missing */
   enforceEncryption: boolean;
-  /** Whether to allow fallback to plaintext on decryption failure */
+  /** Fall back to plaintext parse when decryption fails (downgrade risk, default false) */
   allowPlaintextFallback: boolean;
-  /** Whether to validate decrypted data structure */
+  /** Validate decrypted data structure (default true) */
   validateDecryptedData: boolean;
-  /** Whether callback errors should propagate */
+  /** Throw change-callback errors instead of logging them */
   propagateCallbackErrors: boolean;
   /** Custom data validator function */
   dataValidator: <T>(data: unknown) => data is T[];
-  /** Whether to create backup files on save (default: false for sync scenarios) */
+  /** Write timestamped backups before each save (default false) */
   createBackups: boolean;
-  /** Maximum number of backup files to keep (default: 5) */
+  /** How many backups to keep (default 5) */
   maxBackups: number;
 }
 
@@ -148,62 +149,46 @@ export interface AdapterOptions<T> {
 }
 ```
 
-> 📚 **For complete API documentation and advanced configuration options, visit our [Wiki](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki).**
+### `createEncryption(passphrases, options?)`
 
-## 🛠️ Requirements
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `passphrases` | `string \| Record<number, string>` | yes | Passphrase, or version map for rotation |
+| `options` | `EncryptionOptions` | no | `{ version?: number, iterations?: number }` |
 
-- **Tauri**: v2.0+ with `@tauri-apps/plugin-fs`
-- **SignalDB**: v1.0+  
-- **Node.js**: v18.0+
-- **TypeScript**: v5.0+ (recommended)
+Returns `{ encrypt, decrypt }`, drop-in compatible with the adapter options above.
 
-> **Note**: This adapter has zero runtime dependencies. All required packages are peer dependencies that should already be installed in your Tauri + SignalDB project.
+## Where files live
 
-## 📂 Storage Locations
-
-Files are stored in platform-specific directories:
-
-| Platform | Default Location |
+| Platform | Default location |
 |----------|------------------|
-| **Linux** | `~/.local/share/[app-name]/` |
-| **Windows** | `%APPDATA%/[app-name]/` |
-| **macOS** | `~/Library/Application Support/[app-name]/` |
+| Linux | `~/.local/share/[app-name]/` |
+| Windows | `%APPDATA%/[app-name]/` |
+| macOS | `~/Library/Application Support/[app-name]/` |
 
-> 🗂️ **Need help with custom storage locations?** Check our [Storage Configuration Guide](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Storage%E2%80%90Configuration).
+Pass `base_dir: BaseDirectory.AppConfig` (or another `BaseDirectory`) to store elsewhere.
 
-## 📖 Documentation
+## Security model
 
-For detailed guides and examples, visit our **[Wiki](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki)**:
+What the adapter guarantees:
 
-- 📝 [Usage Examples](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Usage%E2%80%90Examples) - Real-world examples and patterns
-- 🔐 [Security Guide](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Security%E2%80%90Guide) - Encryption best practices and examples
-- 📁 [Storage Configuration](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Storage%E2%80%90Configuration) - Custom directories and file management
-- ⚡ [Performance Tips](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Performance%E2%80%90Tips) - Optimization strategies
-- 🔧 [Troubleshooting](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Troubleshooting) - Common issues and solutions
-- 🏗️ [Migration Guide](https://github.com/pitzzahh/signaldb-adapter-tauri/wiki/Migration%E2%80%90Guide) - Upgrading from other adapters
+- Path traversal is rejected at construction time.
+- AES-GCM authentication detects tampering. Modified ciphertext never loads.
+- `save()` refuses to overwrite when it cannot read the current file, instead of destroying data.
+- Passphrases and keys are held as non-extractable `CryptoKey`s and never written to disk by the adapter.
 
-## 🤝 Contributing
+What stays your job:
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+- Storing the passphrase (user input or OS keychain, never hardcoded).
+- Scoping Tauri fs permissions to your app data directory.
+- Leaving `allowPlaintextFallback: false` unless you are mid-migration. Setting it true lets an attacker downgrade an encrypted store to plaintext by swapping the file.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Found a vulnerability? Do not open a public issue. Email `araopeterj@gmail.com` with `[SECURITY]` in the subject. See [SECURITY.md](SECURITY.md) for timelines.
 
-## 📄 License
+## Contributing
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Bug reports and pull requests are welcome. For anything beyond a small fix, open an issue first so we agree on direction before you write code.
 
-## 🙏 Acknowledgments
+## License
 
-- [SignalDB](https://signaldb.js.org/) - The reactive database this adapter is built for
-- [Tauri](https://tauri.app/) - The framework that makes secure desktop apps possible
-- [Bun](https://bun.sh/) - The fast JavaScript runtime used for development
-
----
-
-<div align="center">
-  <sub>Built with ❤️ by <a href="https://github.com/pitzzahh">Peter John Arao</a></sub>
-</div>
+MIT. See [LICENSE](LICENSE).
