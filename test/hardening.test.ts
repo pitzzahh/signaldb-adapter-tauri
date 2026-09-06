@@ -7,7 +7,7 @@
  */
 import { test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { BaseDirectory } from '@tauri-apps/plugin-fs';
-import { createTauriFileSystemAdapter } from '../src/index';
+import { adapter as createAdapter } from '../src/index';
 import { createEncryption } from '../src/encryption';
 
 interface TestData {
@@ -97,7 +97,7 @@ afterEach(() => {
 // ─── Destructured methods (no `this` dependency) ───
 
 test('Destructured register/load/save work without `this`', async () => {
-  const adapter = createTauriFileSystemAdapter<TestData>('destructured.json');
+  const adapter = createAdapter<TestData>('destructured.json');
   const { register, load, save } = adapter;
 
   await register(mock());
@@ -111,7 +111,7 @@ test('Destructured register/load/save work without `this`', async () => {
 // ─── Serialized saves ───
 
 test('Concurrent saves serialize: last queued write wins exactly', async () => {
-  const adapter = createTauriFileSystemAdapter<TestData>('queued.json');
+  const adapter = createAdapter<TestData>('queued.json');
   await adapter.register(mock());
 
   const a: TestData[] = [{ id: 'a', name: 'first', value: 1 }];
@@ -130,7 +130,7 @@ test('Concurrent saves serialize: last queued write wins exactly', async () => {
 });
 
 test('A failed save does not break the queue for later saves', async () => {
-  const adapter = createTauriFileSystemAdapter<TestData>('queue-recovery.json', {
+  const adapter = createAdapter<TestData>('queue-recovery.json', {
     encrypt: async () => { throw new Error('boom'); },
   });
   await adapter.register(mock()).catch(() => {});
@@ -152,7 +152,7 @@ test('Callback receives Date instances, file stores ISO strings', async () => {
     id: string;
     at: Date;
   }
-  const adapter = createTauriFileSystemAdapter<DatedItem>('dates.json');
+  const adapter = createAdapter<DatedItem>('dates.json');
   let callback_data: any = null;
   await adapter.register((data: any) => { callback_data = data; });
 
@@ -189,24 +189,24 @@ test('Strict filenames are rejected', () => {
     'control.json',
   ];
   for (const filename of bad) {
-    expect(() => createTauriFileSystemAdapter<TestData>(filename), filename).toThrow();
+    expect(() => createAdapter<TestData>(filename), filename).toThrow();
   }
 });
 
 test('Dotfiles are still allowed', () => {
-  expect(() => createTauriFileSystemAdapter<TestData>('.hidden.json')).not.toThrow();
+  expect(() => createAdapter<TestData>('.hidden.json')).not.toThrow();
 });
 
 // ─── Encryption option checks ───
 
 test('enforceEncryption rejects non-function encrypt/decrypt', () => {
-  expect(() => createTauriFileSystemAdapter<TestData>('e1.json', {
+  expect(() => createAdapter<TestData>('e1.json', {
     encrypt: 'not-a-function' as any,
     decrypt: async (s: string) => JSON.parse(s),
     security: { enforceEncryption: true },
   })).toThrow('Encryption enforced but encrypt/decrypt not provided.');
 
-  expect(() => createTauriFileSystemAdapter<TestData>('e2.json', {
+  expect(() => createAdapter<TestData>('e2.json', {
     security: { enforceEncryption: true, allowPlaintextFallback: true },
   })).toThrow('Encryption enforced but encrypt/decrypt not provided.');
 });
@@ -214,7 +214,7 @@ test('enforceEncryption rejects non-function encrypt/decrypt', () => {
 // ─── Undefined changes ───
 
 test('save with undefined changes falls back to full save', async () => {
-  const adapter = createTauriFileSystemAdapter<TestData>('undef.json');
+  const adapter = createAdapter<TestData>('undef.json');
   await adapter.register(mock());
 
   const data: TestData[] = [{ id: '1', name: 'full', value: 1 }];
@@ -263,7 +263,7 @@ test('Corrupt JSON loads empty and warns loudly', async () => {
     `${BaseDirectory.AppLocalData}/corrupt.json`,
     new TextEncoder().encode('{not valid json')
   );
-  const adapter = createTauriFileSystemAdapter<TestData>('corrupt.json');
+  const adapter = createAdapter<TestData>('corrupt.json');
 
   const result = await adapter.load();
 
@@ -274,7 +274,7 @@ test('Corrupt JSON loads empty and warns loudly', async () => {
 // ─── Rename failure cleanup ───
 
 test('Failed atomic rename throws and leaves no temp files', async () => {
-  const adapter = createTauriFileSystemAdapter<TestData>('rename-fail.json');
+  const adapter = createAdapter<TestData>('rename-fail.json');
   await adapter.register(mock());
 
   mock_rename_fn.mockImplementationOnce(async () => {
@@ -297,7 +297,7 @@ test('validateDecryptedData false returns raw JSON as-is', async () => {
     `${BaseDirectory.AppLocalData}/raw.json`,
     new TextEncoder().encode(JSON.stringify({ a: 1 }))
   );
-  const adapter = createTauriFileSystemAdapter<TestData>('raw.json', {
+  const adapter = createAdapter<TestData>('raw.json', {
     security: { validateDecryptedData: false },
   });
 

@@ -6,7 +6,7 @@
 
 Filesystem persistence for [SignalDB](https://github.com/maxnowack/signaldb) in Tauri apps. One line per collection, with optional AES-256-GCM encryption.
 
-8.5 KB minified. Zero runtime dependencies.
+5.86 KB minified (adapter only, 2.46 KB for encryption). Zero runtime dependencies.
 
 ## Install
 
@@ -28,11 +28,11 @@ Peer dependencies (already in your Tauri + SignalDB project):
 
 ```typescript
 import { Collection } from '@signaldb/core';
-import { createTauriFileSystemAdapter } from '@pitzzahh/signaldb-adapter-tauri';
+import { adapter } from '@pitzzahh/signaldb-adapter-tauri';
 
 const users = new Collection({
   name: 'users',
-  persistence: createTauriFileSystemAdapter('users.json')
+  persistence: adapter('users.json')
 });
 
 users.insert({ name: 'John Doe', email: 'john@example.com' });
@@ -68,14 +68,12 @@ Without these, every read and write fails with a permission error. Keep the scop
 ## Encryption
 
 ```typescript
-import {
-  createEncryption,
-  createTauriFileSystemAdapter
-} from '@pitzzahh/signaldb-adapter-tauri';
+import { adapter } from '@pitzzahh/signaldb-adapter-tauri';
+import { createEncryption } from '@pitzzahh/signaldb-adapter-tauri/encryption';
 
 const { encrypt, decrypt } = createEncryption('user-supplied-passphrase');
 
-const adapter = createTauriFileSystemAdapter('secure-data.json', {
+const secure = adapter('secure-data.json', {
   encrypt,
   decrypt,
   security: { enforceEncryption: true, allowPlaintextFallback: false }
@@ -87,6 +85,8 @@ const adapter = createTauriFileSystemAdapter('secure-data.json', {
 Key rotation uses versioned passphrases. Old versions keep decrypting legacy files while new writes use the current key:
 
 ```typescript
+import { createEncryption } from '@pitzzahh/signaldb-adapter-tauri/encryption';
+
 const { encrypt, decrypt } = createEncryption(
   { 1: 'old-passphrase', 2: 'new-passphrase' },
   { version: 2 }
@@ -106,7 +106,7 @@ One honest warning: encryption only helps if the key is not sitting next to the 
 
 ## API
 
-### `createTauriFileSystemAdapter(filename, options?)`
+### `adapter(filename, options?)`
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -116,14 +116,11 @@ One honest warning: encryption only helps if the key is not sitting next to the 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `base_dir` | `BaseDirectory` | `AppLocalData` | Tauri base directory for file storage |
-| `encrypt` | `EncryptFunction<T>` | `undefined` | Custom encryption function |
-| `decrypt` | `DecryptFunction<T>` | `undefined` | Custom decryption function |
+| `encrypt` | `(data: T[]) => Promise<string>` | `undefined` | Custom encryption function |
+| `decrypt` | `(encrypted: string) => Promise<T[]>` | `undefined` | Custom decryption function |
 | `security` | `Partial<SecurityOptions>` | `{}` | Security configuration options |
 
 ```typescript
-export type EncryptFunction<T> = (data: T[]) => Promise<string>;
-export type DecryptFunction<T> = (encrypted: string) => Promise<T[]>;
-
 export interface SecurityOptions {
   /** Throw if encrypt/decrypt are missing */
   enforceEncryption: boolean;
@@ -143,10 +140,13 @@ export interface SecurityOptions {
 
 export interface AdapterOptions<T> {
   base_dir?: import('@tauri-apps/plugin-fs').BaseDirectory;
-  encrypt?: EncryptFunction<T>;
-  decrypt?: DecryptFunction<T>;
+  encrypt?: (data: T[]) => Promise<string>;
+  decrypt?: (encrypted: string) => Promise<T[]>;
   security?: Partial<SecurityOptions>;
 }
+
+// derive function types when needed:
+// type EncryptFn<T> = NonNullable<AdapterOptions<T>['encrypt']>;
 ```
 
 ### `createEncryption(passphrases, options?)`

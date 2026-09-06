@@ -70,7 +70,7 @@ mock.module('@tauri-apps/plugin-fs', () => ({
   open: mock(async () => ({ write: mock(), close: mock(), truncate: mock() })),
 }));
 
-const { createTauriFileSystemAdapter } = await import('../src/index');
+const { adapter: createAdapter } = await import('../src/index');
 
 // Suppress warnings and reset mock state for cleaner output
 beforeEach(() => {
@@ -86,7 +86,7 @@ beforeEach(() => {
 });
 
 test('Backup cleanup respects maxBackups limit', async () => {
-  const adapter = createTauriFileSystemAdapter<TestData>('test.json', {
+  const adapter = createAdapter<TestData>('test.json', {
     security: { createBackups: true, maxBackups: 2 }
   });
   await adapter.register(mock());
@@ -108,7 +108,7 @@ test('Backup cleanup respects maxBackups limit', async () => {
 });
 
 test('Save throws instead of silently destroying data when load fails', async () => {
-  const adapter = createTauriFileSystemAdapter<TestData>('test.json');
+  const adapter = createAdapter<TestData>('test.json');
   await adapter.register(mock());
 
   // Pre-populate with valuable data
@@ -156,7 +156,7 @@ test('Save throws instead of silently destroying data when load fails', async ()
 });
 
 test('Concurrent full-state saves are atomic: last write wins cleanly', async () => {
-  const adapter = createTauriFileSystemAdapter<TestData>('test.json');
+  const adapter = createAdapter<TestData>('test.json');
   await adapter.register(mock());
 
   // Concurrent saves, each saving a full independent dataset.

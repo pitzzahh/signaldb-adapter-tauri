@@ -13,22 +13,11 @@ import {
   rename
 } from '@tauri-apps/plugin-fs';
 import type { SecurityOptions, AdapterOptions } from './types';
+import { eMsg, encoder, decoder } from './utils';
 
-const eMsg = (e: unknown): string =>
-  e instanceof Error ? e.message : String(e);
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-
-/**
- * Clone items for the change callback so callback mutations
- * cannot corrupt adapter state. Prefers structuredClone (keeps
- * Date, Map, etc.); falls back to JSON for older runtimes.
- */
+/** Clone for change callback – structuredClone keeps Date/Map. */
 function cloneForCallback<T>(items: T[]): T[] {
-  if (typeof structuredClone === 'function') {
-    return structuredClone(items);
-  }
-  return JSON.parse(JSON.stringify(items));
+  return structuredClone(items);
 }
 
 /**
@@ -119,7 +108,7 @@ async function cleanupOldBackups(
  * @param options - Configuration including encryption and security settings.
  * @returns A configured persistence adapter instance.
  */
-export function createTauriFileSystemAdapter<T extends { id: ID } & Record<string, any>, ID = string>(
+export function adapter<T extends { id: ID } & Record<string, any>, ID = string>(
   filename: string,
   options?: AdapterOptions<T>
 ): PersistenceAdapter<T, ID> {
@@ -469,8 +458,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
       is_registered = false;
       change_callback = null;
     }
-  }) as PersistenceAdapter<T, ID>;
+  });
 }
 
-export { createEncryption } from './encryption';
-export type { EncryptFunction, DecryptFunction, EncryptedPayload, SecurityOptions, AdapterOptions, EncryptionOptions, EncryptionPair } from './types';
+export type { EncryptedPayload, SecurityOptions, AdapterOptions, EncryptionOptions } from './types';

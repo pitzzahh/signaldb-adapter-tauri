@@ -70,7 +70,7 @@ mock.module('@tauri-apps/plugin-fs', () => ({
 }));
 
 // Now import our adapter after mocking
-const { createTauriFileSystemAdapter } = await import('../src/index');
+const { adapter: createAdapter } = await import('../src/index');
 
 // Utility function for formatted table output
 function formatPerformanceTable(title: string, data: Array<{ label: string; value: string | number; unit?: string }>) {
@@ -193,7 +193,7 @@ class PerformanceTester {
 
   constructor(testFileName: string, encrypted = false) {
     this.testFileName = testFileName;
-    this.adapter = createTauriFileSystemAdapter<TestData>(testFileName, {
+    this.adapter = createAdapter<TestData>(testFileName, {
       encrypt: encrypted ? this.encrypt : undefined,
       decrypt: encrypted ? this.decrypt : undefined
     });
@@ -362,7 +362,7 @@ class NestedPerformanceTester {
 
   constructor(testFileName: string, encrypted = false) {
     this.testFileName = testFileName;
-    this.adapter = createTauriFileSystemAdapter<NestedTestData>(testFileName, {
+    this.adapter = createAdapter<NestedTestData>(testFileName, {
       encrypt: encrypted ? this.encrypt : undefined,
       decrypt: encrypted ? this.decrypt : undefined
     });

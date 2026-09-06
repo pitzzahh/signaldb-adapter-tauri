@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.0.0]: Slim bundle and shorter API
+
+### Breaking
+- **Renamed `createTauriFileSystemAdapter` to `adapter`** (`src/index.ts:111`). New usage `import { adapter } from '@pitzzahh/signaldb-adapter-tauri'` with `adapter('file.json', opts)`.
+- **Encryption moved to subpath** (`src/index.ts:475`, `package.json:40`). Use `import { createEncryption } from '@pitzzahh/signaldb-adapter-tauri/encryption'` instead of the main entry. The main bundle no longer includes `crypto.subtle` and drops from 8.36 KB to 5.86 KB (2.46 KB for `encryption.js`).
+- **Removed `EncryptFunction`, `DecryptFunction`, `EncryptionPair` exports** (`src/types.ts:29`, `src/types.ts:66`). Derive from `AdapterOptions` when needed: `NonNullable<AdapterOptions<Todo>['encrypt']>` or `ReturnType<typeof createEncryption>`.
+
+### Changed
+- `AdapterOptions` is now the single source for encrypt/decrypt signatures (`src/types.ts:29`), no duplicated type aliases.
+- `createEncryption` returns an inline `{ encrypt, decrypt }` pair with generic call-site methods, still drop-in for `adapter`.
+
+### Fixed
+- **Forced casts removed**: `as BufferSource` / `as unknown` on Web Crypto calls replaced by proper `BufferSource` typing (`src/encryption.ts:48`); `requireWebCrypto` guard removed (Tauri v2 + Bun always have Web Crypto).
+- **Shared runtime helpers**: `eMsg`/`encoder`/`decoder` deduped via `src/utils.ts`, `cloneForCallback` now just `structuredClone` (no JSON fallback).
+
+### Package
+- `package.json:7` `exports` adds `"./encryption"` subpath, `sideEffects: false` kept for tree-shaking, `build` now emits `dist/index.js` + `dist/encryption.js` (browser, minified, external peers).
+- `README.md:9,30,70,109` updated for `adapter` name, subpath import, and inline `AdapterOptions` docs.
+
 ## [2.4.0]: Save queue and validation hardening
 
 ### Fixed
