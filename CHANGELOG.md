@@ -1,47 +1,72 @@
 # Changelog
 
-## [2.3.0] — Built-in AES-256-GCM encryption
-
-### Added
-- **`createEncryption()`** — Built-in encryption utility using Web Crypto API (AES-256-GCM + PBKDF2 with 100k iterations). No external dependencies, available in all Tauri v2 webviews. Drop-in compatible with the adapter's `encrypt`/`decrypt` options.
-- **Key rotation support** — Versioned passphrase maps enable seamless key rotation. Old passphrases stay configured for reading legacy data; new writes use the current version.
-- **`EncryptedPayload` type** — Documents the on-disk format (`v{version}:{base64(salt ‖ iv ‖ ciphertext+authTag)}`).
-- **`EncryptionOptions` and `EncryptionPair` types** — Typed API surface for the encryption utility.
-- Comprehensive encryption test suite (`test/encryption.test.ts`) covering round-trips, tampering detection, key rotation, truncation, Unicode, and nested data.
+## [2.4.0]: Save queue and validation hardening
 
 ### Fixed
-- **README security example** — Replaced the Base64 "encryption" example (encoding, not encryption) with `createEncryption()` — real AES-256-GCM.
-- **Wiki Security Guide** — Rewritten to recommend the built-in utility and explicitly warn against HMAC-only and Base64-as-encryption patterns.
+- **Lost updates on concurrent saves**: `save()` calls now run in order through a queue, so overlapping read-modify-write cycles cannot drop updates.
+- **Destructured methods throwing**: `register`, `load`, and `save` no longer depend on `this` and keep working when destructured.
+- **Crash on undefined changes**: `save()` with missing `changes` falls back to a full save instead of throwing on `.removed`.
+- **Silent corrupt loads**: corrupt plaintext JSON still loads as empty for compatibility, but now logs a loud `[DATA]` warning.
+- **Non-array decrypted payloads**: the built-in `decrypt` rejects payloads that do not decode to an array.
+- **Slow base64 on large payloads**: payload encoding is chunked, so multi-hundred-KB collections no longer hit concat and `btoa` limits.
+- **Bench teardown race**: the scaling bench wiped the mock FS while saves drained in the background; loops now use unique filenames without mid-run wipes.
+
+### Added
+- **Stricter filenames**: control characters, `<>:"|?*`, trailing dots and spaces, bare `.`, and Windows device names (`CON`, `NUL`, `COM1`) are rejected. Dotfiles are still allowed.
+- **Passphrase and iteration warnings**: short passphrases (under 12 chars) and PBKDF2 counts under 100k log `[SECURITY]` warnings. Empty passphrases throw.
+- **`structuredClone` callback data**: change callbacks receive real `Date` and `Map` instances instead of JSON-flattened copies.
+- **Bundle size budget**: `bun run size` fails the build over 15 KB (current: 8.5 KB). `sideEffects: false` added for downstream tree shaking.
+- **Hardening test suite** (`test/hardening.test.ts`): 15 tests covering the save queue, destructured methods, strict filenames, weak passphrases, large encrypted payloads, corrupt-file warnings, and rename-failure cleanup.
 
 ### Changed
-- `src/types.ts` — Added `EncryptedPayload` interface.
-- `src/index.ts` — Re-exports `createEncryption`, `EncryptionOptions`, `EncryptionPair`, and `EncryptedPayload`.
+- Build target switched from `node` to `browser`, correct for a Tauri webview. Output size unchanged.
+- `enforceEncryption` now checks that `encrypt` and `decrypt` are functions, not just present.
+- PBKDF2 comment corrected: 100k is the minimum, OWASP recommends 600k.
+- CI runs typecheck and the size budget on every run; publish verifies typecheck, tests, and size before releasing. Installs use `--frozen-lockfile`.
+- README rewritten around setup, encryption, and behavior. SECURITY.md review date refreshed.
 
-## [2.2.1] — CI & trusted publishing
+## [2.3.0]: Built-in AES-256-GCM encryption
+
+### Added
+- **`createEncryption()`**: built-in encryption utility using Web Crypto API (AES-256-GCM + PBKDF2 with 100k iterations minimum). No external dependencies, available in all Tauri v2 webviews. Drop-in compatible with the adapter's `encrypt`/`decrypt` options.
+- **Key rotation support**: versioned passphrase maps enable key rotation. Old passphrases stay configured for reading legacy data; new writes use the current version.
+- **`EncryptedPayload` type**: documents the on-disk format (`v{version}:{base64(salt ‖ iv ‖ ciphertext+authTag)}`).
+- **`EncryptionOptions` and `EncryptionPair` types**: typed API surface for the encryption utility.
+- Full encryption test suite (`test/encryption.test.ts`) covering round-trips, tampering detection, key rotation, truncation, Unicode, and nested data.
+
+### Fixed
+- **README security example**: replaced the Base64 "encryption" example (encoding, not encryption) with `createEncryption()`, real AES-256-GCM.
+- **Wiki Security Guide**: rewritten to recommend the built-in utility and explicitly warn against HMAC-only and Base64-as-encryption patterns.
 
 ### Changed
-- Switched to npm Trusted Publishing (OIDC) — no more `NPM_TOKEN` secret
+- `src/types.ts`: added `EncryptedPayload` interface.
+- `src/index.ts`: re-exports `createEncryption`, `EncryptionOptions`, `EncryptionPair`, and `EncryptedPayload`.
+
+## [2.2.1]: CI and trusted publishing
+
+### Changed
+- Switched to npm Trusted Publishing (OIDC), so no `NPM_TOKEN` secret is needed
 - Bumped `actions/checkout` to v7, `actions/setup-node` to v7, `action-gh-release` to v3 for Node 24 runtime
 - Test workflow: cancel-in-progress, draft PRs trigger on ready-for-review, added `permissions`
 - Auto-create GitHub Release from changelog entry on version bump
 
-## [2.2.0] — Atomic writes & data safety
+## [2.2.0]: Atomic writes and data safety
 
 ### Fixed
-- **Atomic file writes** — Replaced the `write temp → remove old → write final` pattern with `rename`, which is atomic on most filesystems. Prevents data loss on crash between remove and write.
-- **Backup cleanup** — `cleanupOldBackups` was a dead stub that only logged. Now uses `readDir` to list and prune old backups, respecting `maxBackups`.
-- **Silent data loss on load failure** — `load()` previously caught ALL read errors and returned `{ items: [] }`, including transient I/O errors. Now only returns empty for genuine file-not-found; re-throws other errors. `save()` no longer falls back to an empty array on load failure — it throws to prevent silently destroying all existing data.
-- **Temp file collision** — `Date.now()` produced the same temp filename for concurrent saves in the same millisecond, causing write races. Now uses `crypto.randomUUID()` for unique names.
-- **Backup filename collision** — Same `Date.now()` issue; now uses `crypto.randomUUID()` as well.
+- **Atomic file writes**: replaced the `write temp → remove old → write final` pattern with `rename`, which is atomic on most filesystems. Prevents data loss on crash between remove and write.
+- **Backup cleanup**: `cleanupOldBackups` was a dead stub that only logged. Now uses `readDir` to list and prune old backups, respecting `maxBackups`.
+- **Silent data loss on load failure**: `load()` previously caught ALL read errors and returned `{ items: [] }`, including transient I/O errors. Now only returns empty for genuine file-not-found; re-throws other errors. `save()` no longer falls back to an empty array on load failure. It throws to prevent silently destroying all existing data.
+- **Temp file collision**: `Date.now()` produced the same temp filename for concurrent saves in the same millisecond, causing write races. Now uses `crypto.randomUUID()` for unique names.
+- **Backup filename collision**: same `Date.now()` issue; now uses `crypto.randomUUID()` as well.
 
 ### Changed
 - **Breaking (behavioral)**: `load()` now throws on I/O errors instead of silently returning `{ items: [] }`.
 - **Breaking (behavioral)**: `save()` throws `"Refusing to save to prevent data loss"` when it cannot read the current file state, instead of silently destroying all existing data.
 
 ### Added
-- Comprehensive regression test suite (`test/regression.test.ts`)
+- Full regression test suite (`test/regression.test.ts`)
 - 33 new edge case tests (`test/edge-cases.test.ts`) covering Unicode, optional fields, encryption, callbacks, lifecycle, null/undefined changes, deeply nested data, and more.
-- **Bundle size reduction**: Marked peer dependencies as external in build, reducing unpacked size from 23.5 kB → 19.0 kB (gzipped 7.1 kB).
+- **Bundle size reduction**: marked peer dependencies as external in build, reducing unpacked size from 23.5 kB to 19.0 kB (gzipped 7.1 kB).
 
 ## [2.1.6] - 2025-07-08
 
@@ -80,9 +105,9 @@
 
 ## [2.1.0] - 2025-07-06
 
-### 🛡️ SECURITY IMPROVEMENTS
+### Security improvements
 
-**Major security hardening release addressing critical vulnerabilities:**
+**Security hardening release addressing critical vulnerabilities:**
 
 #### Breaking Changes
 - **Data validation enabled by default** - Invalid data structures will now throw errors instead of being silently accepted
@@ -116,11 +141,11 @@ interface SecurityOptions {
 - **Review filename usage**: Ensure filenames don't contain path separators or invalid characters
 - **Update error handling**: Security errors now provide more specific error messages
 
-### 🔧 Technical Improvements
+### Technical improvements
 - Better atomic write operations with verification
 - Enhanced temporary file handling with timestamps
 - Improved cleanup mechanisms for backup and temporary files
-- Comprehensive security test suite
+- Full security test suite
 
 ## [2.0.0] - 2025-07-06
 

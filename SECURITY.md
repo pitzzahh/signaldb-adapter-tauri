@@ -6,15 +6,17 @@ We actively maintain and provide security updates for the following versions of 
 
 | Version | Supported          | Notes                          |
 | ------- | ------------------ | ------------------------------ |
-| 2.3.x   | :white_check_mark: | Latest stable, recommended     |
-| 2.2.x   | :white_check_mark: | Still supported                |
+| 2.4.x   | :white_check_mark: | Latest stable, recommended     |
+| 2.3.x   | :white_check_mark: | Still supported                |
+| 2.2.x   | :warning:          | Critical security fixes only   |
 | 2.1.x   | :warning:          | Critical security fixes only   |
-| 2.0.x   | :warning:          | Critical security fixes only   |
+| 2.0.x   | :x:                | No longer supported            |
 | 1.x.x   | :x:                | No longer supported            |
 | < 1.0   | :x:                | No longer supported            |
 
 ### Security Features by Version
 
+- **v2.4.0+**: Serialized saves, stricter filenames, passphrase warnings
 - **v2.1.0+**: Comprehensive security hardening with encryption enforcement, path traversal protection, and data validation
 - **v2.0.x**: Basic filesystem operations with minimal security features
 - **v1.x.x**: Legacy version with known security limitations
@@ -162,4 +164,4 @@ For general questions, please use [GitHub Issues](https://github.com/pitzzahh/si
 
 ---
 
-*This security policy is reviewed quarterly and updated as needed. Last updated: July 7, 2025*
+*This security policy is reviewed quarterly and updated as needed. Last updated: September 6, 2026*
