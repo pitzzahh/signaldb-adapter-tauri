@@ -20,7 +20,13 @@ jobs:
         with:
           node-version: '24.x'
       - uses: oven-sh/setup-bun@v2
-      - run: bun install
+      - run: bun install --frozen-lockfile
+
+      - name: Verify (typecheck + tests + size)
+        run: |
+          bun run typecheck
+          bun run test
+          bun run size
 
       - name: Check if version already published
         id: check
@@ -41,7 +47,9 @@ jobs:
         run: |
           VERSION="${{ steps.check.outputs.version }}"
           # Extract everything between "## [VERSION]" and the next "## ["
-          BODY=$(awk "/^## \[$VERSION\]/{flag=1; next} /^## \[/{if(flag) exit} flag" CHANGELOG.md)
+          # Escape dots so 2.3.0 does not match 2x3y0.
+          ESCAPED=$(printf '%s' "$VERSION" | sed 's/\./\\./g')
+          BODY=$(awk "/^## \[$ESCAPED\]/{flag=1; next} /^## \[/{if(flag) exit} flag" CHANGELOG.md)
           # Write to file to avoid escaping issues
           echo "$BODY" > /tmp/release-body.md
           echo "body_file=/tmp/release-body.md" >> $GITHUB_OUTPUT
