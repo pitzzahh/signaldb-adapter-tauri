@@ -4,13 +4,16 @@
   "description": "A SignalDB persistence adapter for Tauri apps with optional encryption support",
   "module": "dist/index.js",
   "type": "module",
+  "sideEffects": false,
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target node --minify --external @signaldb/core --external @tauri-apps/plugin-fs --external @tauri-apps/api && tsc --declaration --emitDeclarationOnly --outDir dist",
+    "build": "bun build src/index.ts --outdir dist --target browser --minify --external @signaldb/core --external @tauri-apps/plugin-fs --external @tauri-apps/api && tsc --declaration --emitDeclarationOnly --outDir dist",
+    "typecheck": "tsc --noEmit",
+    "size": "bun run build && node -e \"const fs=require('fs');const b=fs.statSync('dist/index.js').size;const g=require('zlib').gzipSync(fs.readFileSync('dist/index.js')).length;console.log('bundle: '+b+' B, gzip: '+g+' B');if(b>15360){console.error('Bundle too large: '+b+' B > 15360 B');process.exit(1)}\"",
     "test": "bun test test/",
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
     "bench": "bun test scripts/bench.test.ts",
-    "prepublishOnly": "bun run build && bun test"
+    "prepublishOnly": "bun run build && bun run typecheck && bun test"
   },
   "repository": {
     "type": "git",
@@ -51,8 +54,9 @@
     "@tauri-apps/plugin-fs": "2.x"
   },
   "devDependencies": {
-    "@tauri-apps/plugin-fs": "^2.5.1",
     "@signaldb/core": "^1.8.1",
+    "@tauri-apps/plugin-fs": "^2.5.2",
+    "@types/bun": "^1.4.1",
     "typescript": "^7.0.2"
   },
   "engines": {
