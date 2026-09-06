@@ -569,7 +569,7 @@ test('Fallback to full save when changes result in wrong item count', async () =
     { id: '1', name: 'a', value: 1 },
     { id: '3', name: 'c', value: 3 },
   ];
-  // change says add item 3 and remove item 2 — result should be {1,3} = 2 items
+  // change says add item 3 and remove item 2 resulting in {1,3} = 2 items
   // but if we claim to remove id '2' AND not add '3'... mismatch
   await adapter.save(items, {
     added: [{ id: '3', name: 'c', value: 3 }],
@@ -596,7 +596,7 @@ test('Fallback to full save when changes produce wrong IDs', async () => {
     { id: '1', name: 'a', value: 1 },
     { id: '3', name: 'c', value: 3 },
   ];
-  // These changes would produce {2, 3} — mismatch → fallback
+  // These changes would produce {2, 3}, a mismatch, so it falls back
   await adapter.save(expected, {
     added: [{ id: '3', name: 'c', value: 3 }],
     modified: [],

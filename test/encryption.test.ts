@@ -77,7 +77,7 @@ test('decrypt throws on tampered data', async () => {
   for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
 
   // Flip all bits in the last byte (part of the 16-byte GCM auth tag).
-  // Even a single bit flip is enough — this is extreme overkill.
+  // Even a single bit flip is enough. This is extreme overkill.
   bytes[bytes.length - 1] ^= 0xff;
 
   let tamperedBinary = '';
@@ -140,7 +140,7 @@ test('key rotation: encrypt with new key, decrypt with both versions', async () 
   expect(decryptedV2).toEqual(data);
 });
 
-test('key rotation: old passphrase removed — old data fails, new data works', async () => {
+test('key rotation: old passphrase removed, old data fails, new data works', async () => {
   const data = [{ id: '1' }];
 
   // Encrypt with old passphrase

@@ -143,7 +143,7 @@ test('Save throws instead of silently destroying data when load fails', async ()
   }
   expect(save_threw).toBe(true);
 
-  // Original data should still be intact on disk — reset mock and verify
+  // Original data should still be intact on disk. Reset mock and verify
   mock_read_file.mockImplementation(async (filename: string, options?: { baseDir?: BaseDirectory }) => {
     const base_dir = options?.baseDir || BaseDirectory.AppLocalData;
     const content = mock_file_system.get(`${base_dir}/${filename}`);
@@ -155,7 +155,7 @@ test('Save throws instead of silently destroying data when load fails', async ()
   expect(result.items).toEqual(existing);
 });
 
-test('Concurrent full-state saves are atomic — last write wins cleanly', async () => {
+test('Concurrent full-state saves are atomic: last write wins cleanly', async () => {
   const adapter = createTauriFileSystemAdapter<TestData>('test.json');
   await adapter.register(mock());
 
@@ -180,7 +180,7 @@ test('Concurrent full-state saves are atomic — last write wins cleanly', async
 
   // All items should belong to the same save batch (same `i` prefix)
   const prefixes = new Set(result.items!.map((item: TestData) => item.id.split('-')[0]));
-  expect(prefixes.size).toBe(1); // all from the same batch — no mixed corruption
+  expect(prefixes.size).toBe(1); // all from the same batch, no mixed corruption
 
   // Data should be valid JSON, not corrupted
   for (const item of result.items!) {
