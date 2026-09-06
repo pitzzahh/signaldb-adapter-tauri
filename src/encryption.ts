@@ -4,12 +4,8 @@
  * On-disk format: `v{version}:{base64(salt || iv || ciphertext+authTag)}`
  */
 
-import type { EncryptFunction, DecryptFunction, EncryptionOptions, EncryptionPair } from './types';
-
-const eMsg = (e: unknown): string =>
-  e instanceof Error ? e.message : String(e);
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+import type { EncryptionOptions } from './types';
+import { eMsg, encoder, decoder } from './utils';
 
 /** Salt length in bytes (128 bits) */
 const SALT_LENGTH = 16;
@@ -30,22 +26,6 @@ const VERSION_PREFIX = 'v';
 
 // ─── Internal helpers ───────────────────────────────────────────────────
 
-/**
- * Check whether the Web Crypto API is available.
- * Should always be true in Tauri v2 webviews, but we guard for safety.
- */
-function requireWebCrypto(): void {
-  if (
-    typeof crypto === 'undefined' ||
-    typeof crypto.subtle === 'undefined' ||
-    typeof crypto.getRandomValues === 'undefined'
-  ) {
-    throw new Error(
-      'Web Crypto API unavailable. Requires Tauri v2+ webview.'
-    );
-  }
-}
-
 /** Concatenate Uint8Arrays into a single buffer. */
 function concat(...arrays: Uint8Array[]): Uint8Array {
   const total = arrays.reduce((sum, a) => sum + a.byteLength, 0);
@@ -63,12 +43,12 @@ function concat(...arrays: Uint8Array[]): Uint8Array {
  */
 async function deriveKey(
   passphrase: string,
-  salt: Uint8Array,
+  salt: BufferSource,
   iterations: number,
 ): Promise<CryptoKey> {
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(passphrase) as any,
+    encoder.encode(passphrase),
     'PBKDF2',
     false,
     ['deriveKey'],
@@ -77,7 +57,7 @@ async function deriveKey(
   return crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
-      salt: salt as any,
+      salt,
       iterations,
       hash: 'SHA-256',
     },
@@ -132,7 +112,7 @@ function encodeVersionedPayload(version: number, payload: Uint8Array): string {
   let binary = '';
   for (let i = 0; i < payload.byteLength; i += CHUNK) {
     const sub = payload.subarray(i, i + CHUNK);
-    binary += String.fromCharCode.apply(null, sub as unknown as number[]);
+    binary += String.fromCharCode(...sub);
   }
   return `${VERSION_PREFIX}${version}${VERSION_SEPARATOR}${btoa(binary)}`;
 }
@@ -150,9 +130,10 @@ function encodeVersionedPayload(version: number, payload: Uint8Array): string {
 export function createEncryption(
   passphrases: string | Record<number, string>,
   options: EncryptionOptions = {},
-): EncryptionPair {
-  requireWebCrypto();
-
+): {
+  encrypt: <T>(data: T[]) => Promise<string>;
+  decrypt: <T>(encrypted: string) => Promise<T[]>;
+} {
   const passphraseMap: Record<number, string> =
     typeof passphrases === 'string' ? { 1: passphrases } : { ...passphrases };
 
@@ -181,7 +162,7 @@ export function createEncryption(
     );
   }
 
-  const encrypt: EncryptFunction<unknown> = async (data) => {
+  const encrypt = async <T>(data: T[]): Promise<string> => {
     const passphrase = passphraseMap[activeVersion];
     const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
     const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
@@ -191,16 +172,16 @@ export function createEncryption(
     const plaintext = encoder.encode(JSON.stringify(data));
     // AES-GCM appends the 16-byte authentication tag to the ciphertext
     const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: iv as any },
+      { name: 'AES-GCM', iv },
       key,
-      plaintext as any,
+      plaintext,
     );
 
     const binaryPayload = concat(salt, iv, new Uint8Array(encrypted));
     return encodeVersionedPayload(activeVersion, binaryPayload);
   };
 
-  const decrypt: DecryptFunction<unknown> = async (raw) => {
+  const decrypt = async <T>(raw: string): Promise<T[]> => {
     const parsed = parseVersionedPayload(raw);
     if (!parsed) {
       throw new Error(
@@ -232,9 +213,9 @@ export function createEncryption(
     let decrypted: ArrayBuffer;
     try {
       decrypted = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: iv as any },
+        { name: 'AES-GCM', iv: iv },
         key,
-        ciphertext as any,
+        ciphertext,
       );
     } catch (err) {
       const msg = eMsg(err);

@@ -1,6 +1,3 @@
-export type EncryptFunction<T> = (data: T[]) => Promise<string>;
-export type DecryptFunction<T> = (encrypted: string) => Promise<T[]>;
-
 /**
  * Structure of encrypted data from the built-in `createEncryption`.
  * On-disk: `v{version}:{base64(salt || iv || ciphertext+authTag)}`.
@@ -31,8 +28,8 @@ export interface SecurityOptions {
 
 export interface AdapterOptions<T> {
   base_dir?: import('@tauri-apps/plugin-fs').BaseDirectory;
-  encrypt?: EncryptFunction<T>;
-  decrypt?: DecryptFunction<T>;
+  encrypt?: (data: T[]) => Promise<string>;
+  decrypt?: (encrypted: string) => Promise<T[]>;
   security?: Partial<SecurityOptions>;
 }
 
@@ -52,13 +49,4 @@ export interface EncryptionOptions {
    * @default 100_000
    */
   iterations?: number;
-}
-
-/**
- * Result of `createEncryption`. Compatible with the adapter's
- * `encrypt`/`decrypt` options.
- */
-export interface EncryptionPair {
-  encrypt: EncryptFunction<unknown>;
-  decrypt: DecryptFunction<unknown>;
 }
