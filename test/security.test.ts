@@ -41,12 +41,35 @@ const mock_remove = mock(async (filename: string, options?: { baseDir?: BaseDire
   mock_file_system.delete(full_path);
 });
 
+const mock_read_dir = mock(async (path: string, options?: { baseDir?: BaseDirectory }) => {
+  const base_dir = options?.baseDir || BaseDirectory.AppLocalData;
+  const prefix = `${base_dir}/`;
+  const entries: Array<{ name: string; isDirectory: boolean; isFile: boolean; isSymlink: boolean }> = [];
+  for (const [full_path] of mock_file_system) {
+    if (full_path.startsWith(prefix)) {
+      entries.push({ name: full_path.slice(prefix.length), isDirectory: false, isFile: true, isSymlink: false });
+    }
+  }
+  return entries;
+});
+
+const mock_rename_fn = mock(async (oldPath: string, newPath: string, options?: { oldPathBaseDir?: BaseDirectory; newPathBaseDir?: BaseDirectory }) => {
+  const old_base = options?.oldPathBaseDir || BaseDirectory.AppLocalData;
+  const new_base = options?.newPathBaseDir || BaseDirectory.AppLocalData;
+  const content = mock_file_system.get(`${old_base}/${oldPath}`);
+  if (!content) throw new Error(`File not found: ${oldPath}`);
+  mock_file_system.set(`${new_base}/${newPath}`, content);
+  mock_file_system.delete(`${old_base}/${oldPath}`);
+});
+
 // Mock the Tauri fs plugin
 mock.module('@tauri-apps/plugin-fs', () => ({
   exists: mock_exists,
   readFile: mock_read_file,
   writeFile: mock_write_file,
   remove: mock_remove,
+  readDir: mock_read_dir,
+  rename: mock_rename_fn,
   open: mock(async () => ({ write: mock(), close: mock(), truncate: mock() })),
   BaseDirectory: {
     AppLocalData: 'AppLocalData',
@@ -63,6 +86,8 @@ beforeEach(() => {
   mock_read_file.mockClear();
   mock_write_file.mockClear();
   mock_remove.mockClear();
+  mock_read_dir.mockClear();
+  mock_rename_fn.mockClear();
 
   // Suppress non-critical warnings for cleaner test output
   originalConsoleWarn = console.warn;
@@ -121,7 +146,7 @@ test('Security: Warning when no encryption provided', () => {
 
   createTauriFileSystemAdapter<TestData>('test.json');
 
-  expect(warnings.some(w => w.includes('[SECURITY WARNING] No encryption function provided'))).toBe(true);
+  expect(warnings.some(w => w.includes('[SECURITY] No encryption for'))).toBe(true);
 
   console.warn = originalWarn;
 });
@@ -131,7 +156,7 @@ test('Security: Enforce encryption throws when encrypt/decrypt missing', () => {
     createTauriFileSystemAdapter<TestData>('test.json', {
       security: { enforceEncryption: true }
     });
-  }).toThrow('Encryption is enforced but encrypt/decrypt functions are not provided');
+  }).toThrow('Encryption enforced but encrypt/decrypt not provided.');
 });
 
 test('Security: Enforce encryption passes with both encrypt/decrypt', () => {
@@ -166,7 +191,7 @@ test('Security: Decryption failure with no fallback throws error', async () => {
     security: { allowPlaintextFallback: false }
   });
 
-  await expect(adapter.load()).rejects.toThrow('Decryption failed and plaintext fallback is disabled');
+  await expect(adapter.load()).rejects.toThrow('Decryption failed, plaintext fallback disabled');
 });
 
 test('Security: Data validation fails on corrupted data', async () => {

@@ -34,13 +34,36 @@ const mock_remove = mock(async (filename: string, options?: { baseDir?: BaseDire
   mock_file_system.delete(full_path);
 });
 
+const mock_read_dir = mock(async (path: string, options?: { baseDir?: BaseDirectory }) => {
+  const base_dir = options?.baseDir || BaseDirectory.AppLocalData;
+  const prefix = `${base_dir}/`;
+  const entries: Array<{ name: string; isDirectory: boolean; isFile: boolean; isSymlink: boolean }> = [];
+  for (const [full_path] of mock_file_system) {
+    if (full_path.startsWith(prefix)) {
+      entries.push({ name: full_path.slice(prefix.length), isDirectory: false, isFile: true, isSymlink: false });
+    }
+  }
+  return entries;
+});
+
+const mock_rename_fn = mock(async (oldPath: string, newPath: string, options?: { oldPathBaseDir?: BaseDirectory; newPathBaseDir?: BaseDirectory }) => {
+  const old_base = options?.oldPathBaseDir || BaseDirectory.AppLocalData;
+  const new_base = options?.newPathBaseDir || BaseDirectory.AppLocalData;
+  const content = mock_file_system.get(`${old_base}/${oldPath}`);
+  if (!content) throw new Error(`File not found: ${oldPath}`);
+  mock_file_system.set(`${new_base}/${newPath}`, content);
+  mock_file_system.delete(`${old_base}/${oldPath}`);
+});
+
 // Mock the Tauri filesystem module
 mock.module('@tauri-apps/plugin-fs', () => ({
   BaseDirectory,
   exists: mock_exists,
   readFile: mock_read_file,
   writeFile: mock_write_file,
-  remove: mock_remove
+  remove: mock_remove,
+  readDir: mock_read_dir,
+  rename: mock_rename_fn
 }));
 
 // Now import our adapter after mocking
@@ -173,6 +196,12 @@ class PerformanceTester {
     });
 
     this.collection = new Collection<TestData>({ persistence: this.adapter });
+
+    // SignalDB persists in the background and reports save failures through
+    // 'persistence.error'. Without a listener, that emit throws and can fail
+    // a throughput measurement that already recorded its numbers.
+    // Correctness is covered in the other suites, so swallow it here.
+    this.collection.on('persistence.error', () => {});
   }
 
   async initialize(): Promise<void> {
@@ -336,6 +365,9 @@ class NestedPerformanceTester {
     });
 
     this.collection = new Collection<NestedTestData>({ persistence: this.adapter });
+
+    // Same background-save guard as PerformanceTester above.
+    this.collection.on('persistence.error', () => {});
   }
 
   async initialize(): Promise<void> {
@@ -668,8 +700,9 @@ describe('Performance Tests', () => {
     const results: Array<{ size: number; time: number; avgTime: number; throughput: number }> = [];
 
     for (const size of sizes) {
-      // Clear filesystem for each test
-      mock_file_system.clear();
+      // No clear() here on purpose. Each size uses its own filename, and
+      // wiping the shared mock FS would delete temp files of saves still
+      // draining in the background (SignalDB persists asynchronously).
 
       const cleanTester = new PerformanceTester(`perf-scale-${size}.json`);
       await cleanTester.initialize();
@@ -815,15 +848,13 @@ describe('Performance Tests', () => {
     console.warn = () => { };
 
     try {
-      // Test simple data
-      mock_file_system.clear();
+      // Test simple data (no clear(): unique filename, background saves drain).
       const simpleTester = new PerformanceTester('simple-comparison.json');
       await simpleTester.initialize();
       const simpleTime = await simpleTester.testInsertPerformance(itemCount);
       await simpleTester.cleanup();
 
-      // Test nested data
-      mock_file_system.clear();
+      // Test nested data (no clear(): unique filename, background saves drain).
       const nestedComparisonTester = new NestedPerformanceTester('nested-comparison.json');
       await nestedComparisonTester.initialize();
       const nestedTime = await nestedComparisonTester.testNestedInsertPerformance(itemCount);
@@ -856,8 +887,8 @@ describe('Performance Tests', () => {
 
     try {
       for (const size of sizes) {
-        mock_file_system.clear();
-
+        // No clear() here on purpose. Same reason as the other scaling
+        // tests: filenames are unique per size, background saves still drain.
         const scaleTester = new PerformanceTester(`scale-${size}.json`);
         await scaleTester.initialize();
 

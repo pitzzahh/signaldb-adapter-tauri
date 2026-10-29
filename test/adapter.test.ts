@@ -58,6 +58,27 @@ const mock_remove = mock(async (filename: string, options?: { baseDir?: BaseDire
   mock_file_system.delete(full_path);
 });
 
+const mock_read_dir = mock(async (path: string, options?: { baseDir?: BaseDirectory }) => {
+  const base_dir = options?.baseDir || BaseDirectory.AppLocalData;
+  const prefix = `${base_dir}/`;
+  const entries: Array<{ name: string; isDirectory: boolean; isFile: boolean; isSymlink: boolean }> = [];
+  for (const [full_path] of mock_file_system) {
+    if (full_path.startsWith(prefix)) {
+      entries.push({ name: full_path.slice(prefix.length), isDirectory: false, isFile: true, isSymlink: false });
+    }
+  }
+  return entries;
+});
+
+const mock_rename_fn = mock(async (oldPath: string, newPath: string, options?: { oldPathBaseDir?: BaseDirectory; newPathBaseDir?: BaseDirectory }) => {
+  const old_base = options?.oldPathBaseDir || BaseDirectory.AppLocalData;
+  const new_base = options?.newPathBaseDir || BaseDirectory.AppLocalData;
+  const content = mock_file_system.get(`${old_base}/${oldPath}`);
+  if (!content) throw new Error(`File not found: ${oldPath}`);
+  mock_file_system.set(`${new_base}/${newPath}`, content);
+  mock_file_system.delete(`${old_base}/${oldPath}`);
+});
+
 // Mock only the filesystem functions, keep BaseDirectory as-is
 mock.module('@tauri-apps/plugin-fs', () => {
   const actual = require('@tauri-apps/plugin-fs');
@@ -68,6 +89,8 @@ mock.module('@tauri-apps/plugin-fs', () => {
     writeFile: mock_write_file,
     open: mock_open,
     remove: mock_remove,
+    readDir: mock_read_dir,
+    rename: mock_rename_fn,
   };
 });
 
@@ -85,6 +108,8 @@ beforeEach(() => {
   mock_write_file.mockClear();
   mock_open.mockClear();
   mock_remove.mockClear();
+  mock_read_dir.mockClear();
+  mock_rename_fn.mockClear();
 
   // Suppress non-critical warnings for cleaner test output
   originalConsoleWarn = console.warn;
@@ -336,7 +361,7 @@ test('Handles save errors gracefully', async () => {
   should_fail_encryption = true;
 
   // Should throw error on save due to encryption failure
-  expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] })).rejects.toThrow('Failed to save data to test.json');
+  expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] })).rejects.toThrow('Failed to save test.json');
 });
 
 test('Handles register encryption errors gracefully', async () => {

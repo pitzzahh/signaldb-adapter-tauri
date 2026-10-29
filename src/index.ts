@@ -6,15 +6,35 @@ import {
 import {
   BaseDirectory,
   exists,
+  readDir,
   readFile,
   writeFile,
-  remove
+  remove,
+  rename
 } from '@tauri-apps/plugin-fs';
-import { SecurityOptions, AdapterOptions } from './types';
+import type { SecurityOptions, AdapterOptions } from './types';
+
+const eMsg = (e: unknown): string =>
+  e instanceof Error ? e.message : String(e);
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+/**
+ * Clone items for the change callback so callback mutations
+ * cannot corrupt adapter state. Prefers structuredClone (keeps
+ * Date, Map, etc.); falls back to JSON for older runtimes.
+ */
+function cloneForCallback<T>(items: T[]): T[] {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(items);
+  }
+  return JSON.parse(JSON.stringify(items));
+}
 
 /**
  * Validates and sanitizes filename to prevent path traversal attacks
  */
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 function validateFilename(filename: string): void {
   if (!filename || typeof filename !== 'string') {
     throw new Error('Filename must be a non-empty string');
@@ -22,12 +42,24 @@ function validateFilename(filename: string): void {
 
   // Check for path traversal attempts
   if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
-    throw new Error('Invalid filename: possible path traversal detected');
+    throw new Error('Invalid filename: path traversal detected');
   }
 
-  // Check for other dangerous characters
-  if (filename.includes('\0') || filename.includes('\n') || filename.includes('\r')) {
-    throw new Error('Invalid filename: contains null or newline characters');
+  // Check for other dangerous characters: null, newlines, control chars,
+  // and characters illegal on Windows (< > : " | ? *)
+  // eslint-disable-next-line no-control-regex
+  if (/[\0-\x1f<>:"|?*]/.test(filename) || filename.includes('\n') || filename.includes('\r')) {
+    throw new Error('Invalid filename: illegal or control characters');
+  }
+
+  // Reject bare directory refs and trailing dots/spaces
+  // (stripped silently on Windows, causing confusion)
+  if (filename === '.' || /[. ]$/.test(filename)) {
+    throw new Error('Invalid filename: reserved or trailing-dot name');
+  }
+
+  if (WINDOWS_RESERVED.test(filename)) {
+    throw new Error('Invalid filename: reserved device name');
   }
 
   // Ensure reasonable length
@@ -44,11 +76,11 @@ function defaultDataValidator<T>(data: unknown): data is T[] {
 }
 
 /**
- * Creates a backup filename with timestamp
+ * Creates a backup filename with unique identifier
  */
 function createBackupFilename(filename: string): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  return `${filename}.backup.${timestamp}`;
+  return `${filename}.backup.${timestamp}.${crypto.randomUUID()}`;
 }
 
 /**
@@ -57,37 +89,35 @@ function createBackupFilename(filename: string): string {
 async function cleanupOldBackups(
   filename: string,
   maxBackups: number,
-  baseDir: import('@tauri-apps/plugin-fs').BaseDirectory
+  baseDir: BaseDirectory
 ): Promise<void> {
   try {
-    // This is a simplified implementation - in a real scenario, you'd want to
-    // list all files in the directory and filter for backup files
-    // For now, we'll just log that cleanup would happen
-    console.debug(`Backup cleanup for ${filename} - keeping max ${maxBackups} backups`);
+    const entries = await readDir('.', { baseDir });
+    const backup_pattern = `${filename}.backup.`;
+    const backup_entries = entries
+      .filter(entry => entry.name.startsWith(backup_pattern))
+      .sort((a, b) => b.name.localeCompare(a.name)); // newest first (ISO timestamps sort lexicographically)
+
+    // Remove oldest backups beyond the limit
+    for (let i = maxBackups; i < backup_entries.length; i++) {
+      try {
+        await remove(backup_entries[i].name, { baseDir });
+      } catch (removeError) {
+        console.warn(`Failed to remove old backup ${backup_entries[i].name}:`, removeError);
+      }
+    }
   } catch (error) {
     console.warn(`Failed to cleanup old backups for ${filename}:`, error);
   }
 }
 
 /**
- * Creates a persistence adapter for SignalDB that uses Tauri's filesystem API.
- * 
- * Features:
- * - Automatic file creation and initialization
- * - Optional encryption/decryption support with security validation
- * - Atomic write operations for data safety
- * - Change callbacks for reactive updates
- * - Cross-platform Tauri filesystem integration
- * - Graceful error handling and recovery
- * - Security hardening against common attacks
- * - Optional backup creation (disabled by default for sync scenarios)
- * 
- * @template T - The type of items to store, must have an ID field and can contain other properties
- * @template ID - The type of the ID field, defaults to string
- * @param {string} filename - The name of the file to store data in (sanitized for security)
- * @param {AdapterOptions} [options] - Configuration options including security settings
- * @returns {PersistenceAdapter<T, ID>} A configured persistence adapter instance
- * @throws {Error} If there is an error during file operations or security validation fails
+ * Creates a SignalDB persistence adapter backed by Tauri's filesystem API.
+ * Supports optional AES-256-GCM encryption, atomic writes, and backups.
+ *
+ * @param filename - The file to store data in (sanitized for security).
+ * @param options - Configuration including encryption and security settings.
+ * @returns A configured persistence adapter instance.
  */
 export function createTauriFileSystemAdapter<T extends { id: ID } & Record<string, any>, ID = string>(
   filename: string,
@@ -111,30 +141,139 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
   // Security check: warn about unencrypted storage
   if (!options?.encrypt && !security.enforceEncryption) {
     console.warn(
-      `[SECURITY WARNING] No encryption function provided for ${filename}. ` +
-      'Data will be stored in plaintext. Consider enabling encryption for sensitive data.'
+      `[SECURITY] No encryption for ${filename}. ` +
+      'Data stored as plaintext. Enable encryption for production.',
     );
   }
 
   // Performance tip: inform about backup behavior for sync scenarios
   if (security.createBackups) {
     console.info(
-      `[PERFORMANCE INFO] Backup creation is enabled for ${filename}. ` +
-      'For sync scenarios with frequent writes, consider disabling backups ' +
-      'by setting security.createBackups to false.'
+      `[INFO] Backups enabled for ${filename}. ` +
+      'Disable via security.createBackups:false for sync scenarios.',
     );
   }
 
   // Security check: enforce encryption if required
-  if (security.enforceEncryption && (!options?.encrypt || !options?.decrypt)) {
+  if (security.enforceEncryption && (typeof options?.encrypt !== 'function' || typeof options?.decrypt !== 'function')) {
     throw new Error(
-      'Encryption is enforced but encrypt/decrypt functions are not provided. ' +
-      'This is a security requirement.'
+      'Encryption enforced but encrypt/decrypt not provided.',
     );
   }
 
   let change_callback: ((data?: LoadResponse<T>) => void | Promise<void>) | null = null;
   let is_registered = false;
+  // Serialize saves so concurrent save() calls cannot interleave
+  // read-modify-write and lose updates. Each save chains onto the last.
+  let saveQueue: Promise<void> = Promise.resolve();
+
+  // Standalone loader so register/save do not depend on `this`.
+  // Keeps working even if adapter methods are destructured.
+  const loadData = async (): Promise<LoadResponse<T>> => {
+    try {
+      // Atomic check and read to prevent TOCTOU race conditions
+      let contents: Uint8Array;
+      try {
+        contents = await readFile(filename, { baseDir: base_dir });
+      } catch (error) {
+        const msg = eMsg(error);
+        // Only return empty if the file truly doesn't exist
+        if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('no such file')) {
+          return { items: [] };
+        }
+        throw error; // Re-throw I/O errors, permission errors, etc.
+      }
+
+      const text_content = decoder.decode(contents);
+
+      if (!text_content.trim()) return { items: [] };
+
+      let decrypted_data: T[];
+
+      if (options?.decrypt) {
+        try {
+          decrypted_data = await options.decrypt(text_content);
+
+          // Validate decrypted data structure if validation is enabled
+          if (security.validateDecryptedData) {
+            const validator = security.dataValidator || defaultDataValidator;
+            if (!validator<T>(decrypted_data)) {
+              throw new Error('Decrypted data failed validation - corruption or tampering');
+            }
+          }
+        } catch (decryptError) {
+          const errorMsg = eMsg(decryptError);
+          if (!security.allowPlaintextFallback) {
+            throw new Error(
+              `Decryption failed, plaintext fallback disabled: ${errorMsg}`,
+              { cause: decryptError }
+            );
+          }
+
+          console.warn(
+            `[SECURITY] Decryption failed for ${filename}, trying plaintext fallback.`,
+            decryptError
+          );
+
+          try {
+            decrypted_data = JSON.parse(text_content);
+
+            // Validate even fallback data
+            if (security.validateDecryptedData) {
+              const validator = security.dataValidator || defaultDataValidator;
+              if (!validator<T>(decrypted_data)) {
+                throw new Error('Fallback plaintext data failed validation');
+              }
+            }
+          } catch (parseError) {
+            const parseMsg = eMsg(parseError);
+            throw new Error(
+              `Decryption and plaintext parse both failed for ${filename}: ${parseMsg}`,
+              { cause: parseError }
+            );
+          }
+        }
+      } else {
+        try {
+          decrypted_data = JSON.parse(text_content);
+
+          // Validate data structure
+          if (security.validateDecryptedData) {
+            const validator = security.dataValidator || defaultDataValidator;
+            if (!validator<T>(decrypted_data)) {
+              throw new Error('Data failed validation - possible corruption');
+            }
+          }
+        } catch (parseError) {
+          const errorMsg = eMsg(parseError);
+          if (errorMsg.includes('validation')) {
+            throw parseError; // Re-throw validation errors as-is
+          }
+          // Backwards compat: corrupt JSON loads as empty, but warn loudly
+          // so corruption is not silent. The next save refuses to overwrite
+          // when it cannot read, so this does not cause silent data loss.
+          console.warn(
+            `[DATA] Corrupt JSON in ${filename}, loading as empty. ` +
+            `Inspect the file; remove it if you intend a reset.`,
+            parseError,
+          );
+          return { items: [] };
+        }
+      }
+
+      return { items: decrypted_data };
+    } catch (error) {
+      const errorMsg = eMsg(error);
+      // For certain errors, propagate them directly
+      if (errorMsg.includes('Decryption failed and plaintext fallback is disabled') ||
+        errorMsg.includes('Data failed validation') ||
+        errorMsg.includes('Fallback plaintext data failed validation')) {
+        throw error;
+      }
+      // For other errors, wrap them for context
+      throw new Error(`Failed to load ${filename}: ${errorMsg}`, { cause: error });
+    }
+  };
 
   return createPersistenceAdapter({
     async register(onChange) {
@@ -153,7 +292,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
             initial_data = JSON.stringify([]);
           }
 
-          await writeFile(filename, new TextEncoder().encode(initial_data), {
+          await writeFile(filename, encoder.encode(initial_data), {
             baseDir: base_dir
           });
         } catch (error) {
@@ -163,7 +302,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
 
       // Initial load and notify callback
       try {
-        const initialData = await this.load();
+        const initialData = await loadData();
         if (change_callback && initialData.items && initialData.items.length > 0) {
           await change_callback(initialData);
         }
@@ -171,102 +310,10 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
         console.warn(`Failed to load initial data for ${filename}:`, error);
       }
     },
-    async load() {
-      try {
-        // Atomic check and read to prevent TOCTOU race conditions
-        let contents: Uint8Array;
-        try {
-          contents = await readFile(filename, { baseDir: base_dir });
-        } catch (error) {
-          // File doesn't exist or can't be read
-          return { items: [] };
-        }
-
-        const text_content = new TextDecoder().decode(contents);
-
-        if (!text_content.trim()) return { items: [] };
-
-        let decrypted_data: T[];
-
-        if (options?.decrypt) {
-          try {
-            decrypted_data = await options.decrypt(text_content);
-
-            // Validate decrypted data structure if validation is enabled
-            if (security.validateDecryptedData) {
-              const validator = security.dataValidator || defaultDataValidator;
-              if (!validator<T>(decrypted_data)) {
-                throw new Error('Decrypted data failed validation - possible data corruption or tampering');
-              }
-            }
-          } catch (decryptError) {
-            const errorMsg = decryptError instanceof Error ? decryptError.message : String(decryptError);
-            if (!security.allowPlaintextFallback) {
-              throw new Error(
-                `Decryption failed and plaintext fallback is disabled. ` +
-                `This could indicate data tampering or corruption: ${errorMsg}`,
-                { cause: decryptError }
-              );
-            }
-
-            console.warn(
-              `[SECURITY WARNING] Decryption failed for ${filename}. ` +
-              'Attempting plaintext fallback. This could indicate data tampering.',
-              decryptError
-            );
-
-            try {
-              decrypted_data = JSON.parse(text_content);
-
-              // Validate even fallback data
-              if (security.validateDecryptedData) {
-                const validator = security.dataValidator || defaultDataValidator;
-                if (!validator<T>(decrypted_data)) {
-                  throw new Error('Fallback plaintext data failed validation');
-                }
-              }
-            } catch (parseError) {
-              const parseMsg = parseError instanceof Error ? parseError.message : String(parseError);
-              throw new Error(
-                `Both decryption and plaintext parsing failed for ${filename}: ${parseMsg}`,
-                { cause: parseError }
-              );
-            }
-          }
-        } else {
-          try {
-            decrypted_data = JSON.parse(text_content);
-
-            // Validate data structure
-            if (security.validateDecryptedData) {
-              const validator = security.dataValidator || defaultDataValidator;
-              if (!validator<T>(decrypted_data)) {
-                throw new Error('Data failed validation - possible corruption');
-              }
-            }
-          } catch (parseError) {
-            const errorMsg = parseError instanceof Error ? parseError.message : String(parseError);
-            if (errorMsg.includes('validation')) {
-              throw parseError; // Re-throw validation errors as-is
-            }
-            return { items: [] }; // For backwards compatibility with corrupted JSON
-          }
-        }
-
-        return { items: decrypted_data };
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        // For certain errors, propagate them directly
-        if (errorMsg.includes('Decryption failed and plaintext fallback is disabled') ||
-          errorMsg.includes('Data failed validation') ||
-          errorMsg.includes('Fallback plaintext data failed validation')) {
-          throw error;
-        }
-        // For other errors, wrap them for context
-        throw new Error(`Failed to load data from ${filename}: ${errorMsg}`, { cause: error });
-      }
-    },
+    load: loadData,
     async save(items, changes) {
+      // Chain onto the queue so concurrent saves run one at a time.
+      const run = async (): Promise<void> => {
       try {
         // Create backup before modifying data (only if enabled)
         let backup_filename: string | null = null;
@@ -279,7 +326,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
 
         // First, load current data if file exists
         try {
-          const current_data = await this.load();
+          const current_data = await loadData();
           current_items = current_data.items || [];
 
           // Create backup of current state (only if backups are enabled)
@@ -295,30 +342,34 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
             }
           }
         } catch (error) {
-          console.warn('Could not load current data, starting with empty array:', error);
-          current_items = [];
+          throw new Error(
+            `Failed to read ${filename} during save. Refusing to save to prevent data loss.`,
+            { cause: error }
+          );
         }
 
-        // Apply changes incrementally
+        // Apply changes incrementally. SignalDB always passes changes,
+        // but normalize defensively so undefined/null cannot throw.
+        const safeChanges = changes ?? { added: [], modified: [], removed: [] };
         let updated_items = [...current_items];
 
         // Remove items first
-        if (changes.removed && changes.removed.length > 0) {
-          const removedIds = new Set(changes.removed.map(item => item.id));
+        if (safeChanges.removed && safeChanges.removed.length > 0) {
+          const removedIds = new Set(safeChanges.removed.map(item => item.id));
           updated_items = updated_items.filter(item => !removedIds.has(item.id));
         }
 
         // Update existing items
-        if (changes.modified && changes.modified.length > 0) {
-          const modifiedMap = new Map(changes.modified.map(item => [item.id, item]));
+        if (safeChanges.modified && safeChanges.modified.length > 0) {
+          const modifiedMap = new Map(safeChanges.modified.map(item => [item.id, item]));
           updated_items = updated_items.map(item =>
             modifiedMap.has(item.id) ? modifiedMap.get(item.id)! : item
           );
         }
 
         // Add new items
-        if (changes.added && changes.added.length > 0) {
-          updated_items.push(...changes.added);
+        if (safeChanges.added && safeChanges.added.length > 0) {
+          updated_items.push(...safeChanges.added);
         }
 
         // Verify the result matches the provided items array
@@ -328,7 +379,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
 
         if (expected_ids.size !== actual_ids.size ||
           ![...expected_ids].every(id => actual_ids.has(id))) {
-          console.warn('Incremental update mismatch, falling back to full save');
+          console.warn('Incremental update mismatch, using full save');
           updated_items = items;
         }
 
@@ -345,51 +396,32 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
         }
 
         // Use atomic write pattern: write to temporary file first
-        const temp_filename = `${filename}.tmp.${Date.now()}`;
+        const temp_filename = `${filename}.tmp.${crypto.randomUUID()}`;
 
         try {
           // Write to temporary file
-          await writeFile(temp_filename, new TextEncoder().encode(data_to_save), {
+          await writeFile(temp_filename, encoder.encode(data_to_save), {
             baseDir: base_dir
           });
 
-          // Verify the temporary file was written correctly (if possible)
+          // Verify the temporary file was written correctly
           try {
             const temp_contents = await readFile(temp_filename, { baseDir: base_dir });
-            const temp_text = new TextDecoder().decode(temp_contents);
+            const temp_text = decoder.decode(temp_contents);
             if (temp_text !== data_to_save) {
-              throw new Error('Temporary file verification failed - data mismatch');
+              throw new Error('Temp file verification failed');
             }
           } catch (verifyError) {
             // If verification fails, continue anyway for compatibility
             console.warn(`Failed to verify temporary file ${temp_filename}:`, verifyError);
           }
 
-          // Remove old file if it exists and replace with new one
-          // This is the closest we can get to atomic operation in Tauri
-          try {
-            const oldExists = await exists(filename, { baseDir: base_dir });
-            if (oldExists) {
-              await remove(filename, { baseDir: base_dir });
-            }
-          } catch (removeError) {
-            console.warn(`Failed to remove old file ${filename}:`, removeError);
-          }
-
-          // Write the final file
-          await writeFile(filename, new TextEncoder().encode(data_to_save), {
-            baseDir: base_dir
+          // Atomically replace the old file with the new one using rename
+          // rename is atomic on most filesystems (unlike remove + write)
+          await rename(temp_filename, filename, {
+            oldPathBaseDir: base_dir,
+            newPathBaseDir: base_dir
           });
-
-          // Clean up temp file
-          try {
-            const tempExists = await exists(temp_filename, { baseDir: base_dir });
-            if (tempExists) {
-              await remove(temp_filename, { baseDir: base_dir });
-            }
-          } catch (cleanupError) {
-            console.warn(`Failed to cleanup temp file ${temp_filename}:`, cleanupError);
-          }
 
         } catch (writeError) {
           // Clean up temp file on error
@@ -401,14 +433,14 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
           } catch (cleanupError) {
             console.warn(`Failed to cleanup temp file after error:`, cleanupError);
           }
-          throw new Error(`Failed to write data to ${filename}`, { cause: writeError });
+          throw new Error(`Failed to write ${filename}`, { cause: writeError });
         }
 
         // Notify callback about the change if registered
         if (is_registered && change_callback) {
           try {
             // Clone data to prevent mutation in callback
-            const callback_data = { items: JSON.parse(JSON.stringify(updated_items)) };
+            const callback_data = { items: cloneForCallback(updated_items) };
             await change_callback(callback_data);
           } catch (callbackError) {
             if (security.propagateCallbackErrors) {
@@ -419,13 +451,18 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
           }
         }
       } catch (error) {
-        // Re-throw callback errors if they should propagate
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        if (errorMsg.includes('Change callback failed')) {
+        // Re-throw specific errors without wrapping
+        const errorMsg = eMsg(error);
+        if (errorMsg.includes('Change callback failed') || errorMsg.includes('Refusing to save')) {
           throw error;
         }
-        throw new Error(`Failed to save data to ${filename}`, { cause: error });
+        throw new Error(`Failed to save ${filename}`, { cause: error });
       }
+      };
+      const pending = saveQueue.then(run, run);
+      // Keep the chain alive even if this save fails.
+      saveQueue = pending.catch(() => {});
+      return pending;
     },
     async unregister() {
       // Clean up the change callback when unregistering
