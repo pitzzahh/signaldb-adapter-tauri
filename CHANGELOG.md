@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.1.7] — Security hardening backport
+
+Backports the 2.2.0 data-safety fixes and 2.4.0 adapter hardening to the 2.1.x line (which has no built-in encryption module, so passphrase/payload items do not apply). No API changes. Error and warning message wording now matches newer 2.x releases.
+
+### Fixed
+- **Non-atomic writes**: replaced the `write temp → remove old → write final` pattern with `rename`, which is atomic on most filesystems. Prevents data loss on crash between remove and write.
+- **Silent data loss on load failure**: `load()` now only returns empty for genuine file-not-found and re-throws other errors. `save()` refuses to overwrite when it cannot read current state.
+- **Temp/backup filename collision**: `Date.now()` temp names replaced with `crypto.randomUUID()`.
+- **Dead backup cleanup**: `cleanupOldBackups` now lists and prunes old backups via `readDir`, respecting `maxBackups`.
+- **Lost updates on concurrent saves**: `save()` calls now run in order through a queue.
+- **Encryption enforcement bypass**: `enforceEncryption` now requires `encrypt`/`decrypt` to be functions, not just truthy.
+- **Weak filename validation**: control characters, `<>:"|?*`, trailing dots and spaces, bare `.`, and Windows device names (`CON`, `NUL`, `COM1`) are now rejected.
+- **Silent corrupt loads**: corrupt plaintext JSON still loads as empty for compatibility, but now logs a loud `[DATA]` warning.
+- **Crash on undefined changes**: `save()` with missing `changes` falls back to a full save instead of throwing on `.removed`.
+- **Destructured methods throwing**: `register`, `load`, and `save` no longer depend on `this`.
+
+### Added
+- Hardening test suite (`test/hardening.test.ts`, 11 tests): save queue, strict filenames, corrupt-file warnings, and rename-failure cleanup.
+
 ## [2.1.6] - 2025-07-08
 
 ### Fixed
