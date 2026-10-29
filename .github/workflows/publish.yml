@@ -84,5 +84,10 @@ jobs:
         if: steps.check.outputs.should_publish == 'true' && github.event_name != 'release'
         with:
           tag_name: v${{ steps.check.outputs.version }}
+          # The GitHub API defaults new tags to the default branch, which
+          # mistargets maintenance releases. Pin to the built commit.
+          target_commitish: ${{ github.sha }}
+          # Only mainline releases take the Latest badge.
+          make_latest: ${{ steps.check.outputs.tag == 'latest' }}
           body_path: ${{ steps.changelog.outputs.body_file }}
           generate_release_notes: false
