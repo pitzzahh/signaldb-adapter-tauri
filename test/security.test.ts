@@ -65,8 +65,9 @@ const mock_rename_fn = mock(async (oldPath: string, newPath: string, options?: {
   mock_file_system.delete(old_full);
 });
 
-// Mock the Tauri fs plugin
+// Mock the Tauri fs plugin (mock only the filesystem functions, keep BaseDirectory as-is)
 mock.module('@tauri-apps/plugin-fs', () => ({
+  BaseDirectory,
   exists: mock_exists,
   readFile: mock_read_file,
   readDir: mock_read_dir,
@@ -74,10 +75,6 @@ mock.module('@tauri-apps/plugin-fs', () => ({
   remove: mock_remove,
   rename: mock_rename_fn,
   open: mock(async () => ({ write: mock(), close: mock(), truncate: mock() })),
-  BaseDirectory: {
-    AppLocalData: 'AppLocalData',
-    Document: 'Document'
-  }
 }));
 
 // Global warning suppression for cleaner test output
@@ -186,7 +183,7 @@ test('Security: Decryption failure with no fallback throws error', async () => {
 
   // Store tampered data
   const tampered_data = new TextEncoder().encode('tampered_data_not_encrypted');
-  mock_file_system.set('AppLocalData/test.json', tampered_data);
+  mock_file_system.set(`${BaseDirectory.AppLocalData}/test.json`, tampered_data);
 
   const adapter = createTauriFileSystemAdapter<TestData>('test.json', {
     encrypt,
@@ -214,7 +211,7 @@ test('Security: Data validation fails on corrupted data', async () => {
     { id: '1', corrupted: true }, // Missing required fields
     { name: 'test' } // Missing id and value
   ]));
-  mock_file_system.set('AppLocalData/test.json', corrupted_data);
+  mock_file_system.set(`${BaseDirectory.AppLocalData}/test.json`, corrupted_data);
 
   const adapter = createTauriFileSystemAdapter<TestData>('test.json', {
     security: {
@@ -273,7 +270,7 @@ test('Security: Backup files are created on save when enabled', async () => {
   const existing_data = new TextEncoder().encode(JSON.stringify([
     { id: '1', name: 'existing', value: 1 }
   ]));
-  mock_file_system.set('AppLocalData/test.json', existing_data);
+  mock_file_system.set(`${BaseDirectory.AppLocalData}/test.json`, existing_data);
 
   const adapter = createTauriFileSystemAdapter<TestData>('test.json', {
     security: { createBackups: true }
@@ -296,7 +293,7 @@ test('Security: Backup files are NOT created by default (for sync scenarios)', a
   const existing_data = new TextEncoder().encode(JSON.stringify([
     { id: '1', name: 'existing', value: 1 }
   ]));
-  mock_file_system.set('AppLocalData/test.json', existing_data);
+  mock_file_system.set(`${BaseDirectory.AppLocalData}/test.json`, existing_data);
 
   const adapter = createTauriFileSystemAdapter<TestData>('test.json');
   await adapter.register(mock());
