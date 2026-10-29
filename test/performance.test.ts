@@ -199,6 +199,12 @@ class PerformanceTester {
     });
 
     this.collection = new Collection<TestData>({ persistence: this.adapter });
+
+    // SignalDB persists in the background and reports save failures through
+    // 'persistence.error'. Without a listener, that emit throws and can fail
+    // a throughput measurement that already recorded its numbers.
+    // Correctness is covered in the other suites, so swallow it here.
+    this.collection.on('persistence.error', () => {});
   }
 
   async initialize(): Promise<void> {
@@ -362,6 +368,9 @@ class NestedPerformanceTester {
     });
 
     this.collection = new Collection<NestedTestData>({ persistence: this.adapter });
+
+    // Same background-save guard as PerformanceTester above.
+    this.collection.on('persistence.error', () => {});
   }
 
   async initialize(): Promise<void> {
@@ -694,8 +703,9 @@ describe('Performance Tests', () => {
     const results: Array<{ size: number; time: number; avgTime: number; throughput: number }> = [];
 
     for (const size of sizes) {
-      // Clear filesystem for each test
-      mock_file_system.clear();
+      // No clear() here on purpose. Each size uses its own filename, and
+      // wiping the shared mock FS would delete temp files of saves still
+      // draining in the background (SignalDB persists asynchronously).
 
       const cleanTester = new PerformanceTester(`perf-scale-${size}.json`);
       await cleanTester.initialize();
@@ -841,15 +851,13 @@ describe('Performance Tests', () => {
     console.warn = () => { };
 
     try {
-      // Test simple data
-      mock_file_system.clear();
+      // Test simple data (no clear(): unique filename, background saves drain).
       const simpleTester = new PerformanceTester('simple-comparison.json');
       await simpleTester.initialize();
       const simpleTime = await simpleTester.testInsertPerformance(itemCount);
       await simpleTester.cleanup();
 
-      // Test nested data
-      mock_file_system.clear();
+      // Test nested data (no clear(): unique filename, background saves drain).
       const nestedComparisonTester = new NestedPerformanceTester('nested-comparison.json');
       await nestedComparisonTester.initialize();
       const nestedTime = await nestedComparisonTester.testNestedInsertPerformance(itemCount);
@@ -882,8 +890,8 @@ describe('Performance Tests', () => {
 
     try {
       for (const size of sizes) {
-        mock_file_system.clear();
-
+        // No clear() here on purpose. Same reason as the other scaling
+        // tests: filenames are unique per size, background saves still drain.
         const scaleTester = new PerformanceTester(`scale-${size}.json`);
         await scaleTester.initialize();
 
