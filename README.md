@@ -95,6 +95,70 @@ const { encrypt, decrypt } = createEncryption(
 
 One honest warning: encryption only helps if the key is not sitting next to the data. Do not hardcode the passphrase. Prompt the user for it or keep it in the OS keychain (for example via `tauri-plugin-stronghold`). You can also bring your own `encrypt`/`decrypt` functions if you already have a key management story.
 
+### Storing the passphrase with Stronghold
+
+Copy-paste pattern: generate a random passphrase once, keep it in a Stronghold vault, and unlock the vault with a user-supplied password. Nothing is embedded in the bundle, so there is nothing to reverse-engineer out of it.
+
+**1. Register the plugin** in `src-tauri/src/lib.rs` (see the [Stronghold plugin docs](https://tauri.app/plugin/stronghold/) for the current setup):
+
+```rust
+tauri::Builder::default()
+    .plugin(tauri_plugin_stronghold::Builder::new(|password| {
+        // Derive the snapshot key, e.g. with argon2 (see plugin docs).
+        // Return the derived key bytes here.
+        key.to_vec()
+    }).build())
+```
+
+Add `"stronghold:default"` to your capability file's `permissions` alongside the fs permissions above.
+
+**2. Load or generate the passphrase** on the frontend:
+
+```typescript
+import { Stronghold } from '@tauri-apps/plugin-stronghold';
+import { appDataDir } from '@tauri-apps/api/path';
+import { adapter } from '@pitzzahh/signaldb-adapter-tauri';
+import { createEncryption } from '@pitzzahh/signaldb-adapter-tauri/encryption';
+
+async function loadPassphrase(vaultPassword: string): Promise<string> {
+  const stronghold = await Stronghold.load(
+    `${await appDataDir()}/vault.hold`,
+    vaultPassword, // must come from the user (prompt), never hardcoded
+  );
+  let client;
+  try {
+    client = await stronghold.loadClient('signaldb');
+  } catch {
+    client = await stronghold.createClient('signaldb');
+  }
+  const store = client.getStore();
+
+  const existing = await store.get('signaldb-passphrase');
+  if (existing) return new TextDecoder().decode(existing);
+
+  // First run: generate 256 bits of randomness, store, persist.
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const passphrase = btoa(String.fromCharCode(...bytes));
+  await store.insert(
+    'signaldb-passphrase',
+    Array.from(new TextEncoder().encode(passphrase)),
+  );
+  await stronghold.save();
+  return passphrase;
+}
+
+// vaultPassword comes from your login/unlock UI:
+const { encrypt, decrypt } = createEncryption(await loadPassphrase(vaultPassword));
+
+const secure = adapter('secure-data.json', {
+  encrypt,
+  decrypt,
+  security: { enforceEncryption: true, allowPlaintextFallback: false },
+});
+```
+
+Why this shape: the vault password is the only secret the user must remember, and the actual database passphrase is high-entropy randomness no one needs to type. Hardcoding `vaultPassword` instead of prompting would just move the embedded-secret problem one layer down — don't do that. If a vault is overkill for your app, the simpler secure option is to prompt for the database passphrase on every launch and skip Stronghold entirely.
+
 ## Behavior worth knowing
 
 - **Atomic writes.** Each save goes to a temp file, then renames over the original. A crash mid-write leaves the previous version intact.
