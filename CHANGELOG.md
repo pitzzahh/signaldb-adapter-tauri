@@ -1,5 +1,10 @@
 # Changelog
 
+## [3.0.1]: Stronghold passphrase docs
+
+### Added
+- **Stronghold passphrase pattern** (`README.md`): copy-paste example that generates a random passphrase once, keeps it in a Stronghold vault, and unlocks the vault with a user-supplied password. Nothing is embedded in the bundle, so there is nothing to pull out of it by reverse engineering.
+
 ## [3.0.0]: Slim bundle and shorter API
 
 ### Breaking

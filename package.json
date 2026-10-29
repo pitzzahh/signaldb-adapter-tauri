@@ -1,6 +1,6 @@
 {
   "name": "@pitzzahh/signaldb-adapter-tauri",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "A SignalDB persistence adapter for Tauri apps with optional encryption support",
   "module": "dist/index.js",
   "type": "module",
