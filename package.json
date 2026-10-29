@@ -33,7 +33,7 @@
     "adapter",
     "encryption"
   ],
-  "author": "Peter John Arao <araopeterj@gmail.com>",
+  "author": "Peter John Arao <hello@peterjohnarao.com>",
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
