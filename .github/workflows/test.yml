@@ -1,3 +1,4 @@
+# probe: confirms PRs targeting maintenance lines get CI (close unmerged)
 name: Test
 
 on:
