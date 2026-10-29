@@ -166,7 +166,7 @@ Why this shape: the vault password is the only secret the user must remember, an
 - **Missing files start empty.** A corrupt plaintext file loads as empty with a loud console warning. Encrypted files fail loudly instead of guessing.
 - **Flat filenames only.** No paths, no `..`, no reserved device names (`CON`, `NUL`, ...). One file per collection, in one base directory.
 - **Backups are off by default.** Frequent sync writes would pile up backup files, so set `security.createBackups: true` only if you want timestamped copies before each save.
-- **Passing validation is on by default.** Decrypted data must be an array unless you supply a custom `dataValidator` or disable the check.
+- **Data validation is on by default.** Decrypted data must be an array unless you supply a custom `dataValidator` or disable the check.
 
 ## API
 
@@ -247,7 +247,7 @@ What stays your job:
 - Scoping Tauri fs permissions to your app data directory.
 - Leaving `allowPlaintextFallback: false` unless you are mid-migration. Setting it true lets an attacker downgrade an encrypted store to plaintext by swapping the file.
 
-Found a vulnerability? Do not open a public issue. Email `araopeterj@gmail.com` with `[SECURITY]` in the subject. See [SECURITY.md](SECURITY.md) for timelines.
+Found a vulnerability? Do not open a public issue. Email `hello@peterjohnarao.com` with `[SECURITY]` in the subject. See [SECURITY.md](SECURITY.md) for timelines.
 
 ## Contributing
 

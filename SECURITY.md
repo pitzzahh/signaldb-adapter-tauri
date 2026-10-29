@@ -4,18 +4,20 @@
 
 We actively maintain and provide security updates for the following versions of `@pitzzahh/signaldb-adapter-tauri`:
 
-| Version | Supported          | Notes                          |
-| ------- | ------------------ | ------------------------------ |
-| 2.4.x   | :white_check_mark: | Latest stable, recommended     |
-| 2.3.x   | :white_check_mark: | Still supported                |
-| 2.2.x   | :warning:          | Critical security fixes only   |
-| 2.1.x   | :warning:          | Critical security fixes only   |
-| 2.0.x   | :x:                | No longer supported            |
-| 1.x.x   | :x:                | No longer supported            |
-| < 1.0   | :x:                | No longer supported            |
+| Version | Supported          | Notes                                         |
+| ------- | ------------------ | --------------------------------------------- |
+| 3.0.x   | :white_check_mark: | Latest stable, recommended                    |
+| 2.4.x   | :white_check_mark: | Still supported                               |
+| 2.3.x   | :white_check_mark: | Still supported (hardening backported: 2.3.1) |
+| 2.2.x   | :warning:          | Critical security fixes only (patched: 2.2.2) |
+| 2.1.x   | :warning:          | Critical security fixes only (patched: 2.1.7) |
+| 2.0.x   | :x:                | No longer supported                           |
+| 1.x.x   | :x:                | No longer supported                           |
+| < 1.0   | :x:                | No longer supported                           |
 
 ### Security Features by Version
 
+- **v3.0.0+**: Same hardening as v2.4.x; slimmer API (`adapter`, encryption subpath)
 - **v2.4.0+**: Serialized saves, stricter filenames, passphrase warnings
 - **v2.1.0+**: Comprehensive security hardening with encryption enforcement, path traversal protection, and data validation
 - **v2.0.x**: Basic filesystem operations with minimal security features
@@ -28,7 +30,7 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 ### How to Report
 
 1. **DO NOT** create a public GitHub issue for security vulnerabilities
-2. **Email us directly** at: [araopeterj@gmail.com](mailto:araopeterj@gmail.com)
+2. **Email us directly** at: [hello@peterjohnarao.com](mailto:hello@peterjohnarao.com)
 3. **Use the subject line**: `[SECURITY] SignalDB Adapter Vulnerability Report`
 4. **Include the following information**:
    - Description of the vulnerability
@@ -77,7 +79,7 @@ When using this adapter, follow these security recommendations:
 ### 1. Encryption
 ```typescript
 // Always use encryption for sensitive data
-const adapter = createTauriFileSystemAdapter('data.json', {
+const secure = adapter('data.json', {
   encrypt: yourEncryptFunction,
   decrypt: yourDecryptFunction,
   security: {
@@ -91,18 +93,18 @@ const adapter = createTauriFileSystemAdapter('data.json', {
 ```typescript
 // Use safe filenames - avoid path traversal
 // ✅ Good
-createTauriFileSystemAdapter('users.json')
-createTauriFileSystemAdapter('app-data.json')
+adapter('users.json')
+adapter('app-data.json')
 
 // ❌ Avoid
-createTauriFileSystemAdapter('../../../etc/passwd')
-createTauriFileSystemAdapter('data\\..\\config.json')
+adapter('../../../etc/passwd')
+adapter('data\\..\\config.json')
 ```
 
 ### 3. Data Validation
 ```typescript
 // Implement custom data validation
-const adapter = createTauriFileSystemAdapter('data.json', {
+const secure = adapter('data.json', {
   security: {
     validateDecryptedData: true,
     dataValidator: (data): data is MyDataType[] => {
@@ -157,11 +159,11 @@ We appreciate security researchers who responsibly disclose vulnerabilities. Con
 ## Contact
 
 For security-related questions or concerns:
-- **Email**: [araopeterj@gmail.com](mailto:araopeterj@gmail.com)
+- **Email**: [hello@peterjohnarao.com](mailto:hello@peterjohnarao.com)
 - **GitHub**: [@pitzzahh](https://github.com/pitzzahh)
 
 For general questions, please use [GitHub Issues](https://github.com/pitzzahh/signaldb-adapter-tauri/issues).
 
 ---
 
-*This security policy is reviewed quarterly and updated as needed. Last updated: September 6, 2026*
+*This security policy is reviewed quarterly and updated as needed. Last updated: October 29, 2026*
