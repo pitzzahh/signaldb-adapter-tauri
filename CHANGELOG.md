@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.3.1] — Security hardening backport
+
+Backports the 2.4.0 hardening fixes to the 2.3.x line. No API changes.
+
+### Fixed
+- **Lost updates on concurrent saves**: `save()` calls now run in order through a queue.
+- **Encryption enforcement bypass**: `enforceEncryption` now requires `encrypt`/`decrypt` to be functions, not just truthy.
+- **Weak filename validation**: control characters, `<>:"|?*`, trailing dots and spaces, bare `.`, and Windows device names (`CON`, `NUL`, `COM1`) are now rejected.
+- **Weak crypto accepted silently**: short passphrases (under 12 chars) and PBKDF2 counts under 100k log `[SECURITY]` warnings. Empty/non-string passphrases throw.
+- **Non-array decrypted payloads**: the built-in `decrypt` rejects payloads that do not decode to an array.
+- **Large-payload DoS**: payload encoding is chunked, so multi-hundred-KB collections no longer hit concat and `btoa` limits.
+- **Silent corrupt loads**: corrupt plaintext JSON still loads as empty for compatibility, but now logs a loud `[DATA]` warning.
+- **Crash on undefined changes**: `save()` with missing `changes` falls back to a full save instead of throwing on `.removed`.
+
+### Added
+- Hardening test suite (`test/hardening.test.ts`): 15 tests covering the save queue, strict filenames, weak passphrases, large encrypted payloads, corrupt-file warnings, and rename-failure cleanup.
+
 ## [2.3.0] — Built-in AES-256-GCM encryption
 
 ### Added
