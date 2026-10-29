@@ -12,7 +12,7 @@ import {
   remove,
   rename
 } from '@tauri-apps/plugin-fs';
-import { SecurityOptions, AdapterOptions } from './types';
+import type { SecurityOptions, AdapterOptions } from './types';
 
 const eMsg = (e: unknown): string =>
   e instanceof Error ? e.message : String(e);
@@ -20,8 +20,21 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 /**
+ * Clone items for the change callback so callback mutations
+ * cannot corrupt adapter state. Prefers structuredClone (keeps
+ * Date, Map, etc.); falls back to JSON for older runtimes.
+ */
+function cloneForCallback<T>(items: T[]): T[] {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(items);
+  }
+  return JSON.parse(JSON.stringify(items));
+}
+
+/**
  * Validates and sanitizes filename to prevent path traversal attacks
  */
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 function validateFilename(filename: string): void {
   if (!filename || typeof filename !== 'string') {
     throw new Error('Filename must be a non-empty string');
@@ -32,9 +45,21 @@ function validateFilename(filename: string): void {
     throw new Error('Invalid filename: path traversal detected');
   }
 
-  // Check for other dangerous characters
-  if (filename.includes('\0') || filename.includes('\n') || filename.includes('\r')) {
-    throw new Error('Invalid filename: null or newline characters');
+  // Check for other dangerous characters: null, newlines, control chars,
+  // and characters illegal on Windows (< > : " | ? *)
+  // eslint-disable-next-line no-control-regex
+  if (/[\0-\x1f<>:"|?*]/.test(filename) || filename.includes('\n') || filename.includes('\r')) {
+    throw new Error('Invalid filename: illegal or control characters');
+  }
+
+  // Reject bare directory refs and trailing dots/spaces
+  // (stripped silently on Windows, causing confusion)
+  if (filename === '.' || /[. ]$/.test(filename)) {
+    throw new Error('Invalid filename: reserved or trailing-dot name');
+  }
+
+  if (WINDOWS_RESERVED.test(filename)) {
+    throw new Error('Invalid filename: reserved device name');
   }
 
   // Ensure reasonable length
@@ -130,7 +155,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
   }
 
   // Security check: enforce encryption if required
-  if (security.enforceEncryption && (!options?.encrypt || !options?.decrypt)) {
+  if (security.enforceEncryption && (typeof options?.encrypt !== 'function' || typeof options?.decrypt !== 'function')) {
     throw new Error(
       'Encryption enforced but encrypt/decrypt not provided.',
     );
@@ -138,6 +163,117 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
 
   let change_callback: ((data?: LoadResponse<T>) => void | Promise<void>) | null = null;
   let is_registered = false;
+  // Serialize saves so concurrent save() calls cannot interleave
+  // read-modify-write and lose updates. Each save chains onto the last.
+  let saveQueue: Promise<void> = Promise.resolve();
+
+  // Standalone loader so register/save do not depend on `this`.
+  // Keeps working even if adapter methods are destructured.
+  const loadData = async (): Promise<LoadResponse<T>> => {
+    try {
+      // Atomic check and read to prevent TOCTOU race conditions
+      let contents: Uint8Array;
+      try {
+        contents = await readFile(filename, { baseDir: base_dir });
+      } catch (error) {
+        const msg = eMsg(error);
+        // Only return empty if the file truly doesn't exist
+        if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('no such file')) {
+          return { items: [] };
+        }
+        throw error; // Re-throw I/O errors, permission errors, etc.
+      }
+
+      const text_content = decoder.decode(contents);
+
+      if (!text_content.trim()) return { items: [] };
+
+      let decrypted_data: T[];
+
+      if (options?.decrypt) {
+        try {
+          decrypted_data = await options.decrypt(text_content);
+
+          // Validate decrypted data structure if validation is enabled
+          if (security.validateDecryptedData) {
+            const validator = security.dataValidator || defaultDataValidator;
+            if (!validator<T>(decrypted_data)) {
+              throw new Error('Decrypted data failed validation - corruption or tampering');
+            }
+          }
+        } catch (decryptError) {
+          const errorMsg = eMsg(decryptError);
+          if (!security.allowPlaintextFallback) {
+            throw new Error(
+              `Decryption failed, plaintext fallback disabled: ${errorMsg}`,
+              { cause: decryptError }
+            );
+          }
+
+          console.warn(
+            `[SECURITY] Decryption failed for ${filename}, trying plaintext fallback.`,
+            decryptError
+          );
+
+          try {
+            decrypted_data = JSON.parse(text_content);
+
+            // Validate even fallback data
+            if (security.validateDecryptedData) {
+              const validator = security.dataValidator || defaultDataValidator;
+              if (!validator<T>(decrypted_data)) {
+                throw new Error('Fallback plaintext data failed validation');
+              }
+            }
+          } catch (parseError) {
+            const parseMsg = eMsg(parseError);
+            throw new Error(
+              `Decryption and plaintext parse both failed for ${filename}: ${parseMsg}`,
+              { cause: parseError }
+            );
+          }
+        }
+      } else {
+        try {
+          decrypted_data = JSON.parse(text_content);
+
+          // Validate data structure
+          if (security.validateDecryptedData) {
+            const validator = security.dataValidator || defaultDataValidator;
+            if (!validator<T>(decrypted_data)) {
+              throw new Error('Data failed validation - possible corruption');
+            }
+          }
+        } catch (parseError) {
+          const errorMsg = eMsg(parseError);
+          if (errorMsg.includes('validation')) {
+            throw parseError; // Re-throw validation errors as-is
+          }
+          // Backwards compat: corrupt JSON loads as empty, but warn loudly
+          // so corruption is not silent. The next save refuses to overwrite
+          // when it cannot read, so this does not cause silent data loss.
+          console.warn(
+            `[DATA] Corrupt JSON in ${filename}, loading as empty. ` +
+            `Inspect the file; remove it if you intend a reset.`,
+            parseError,
+          );
+          return { items: [] };
+        }
+      }
+
+      return { items: decrypted_data };
+    } catch (error) {
+      const errorMsg = eMsg(error);
+      // For certain errors, propagate them directly
+      if (errorMsg.includes('Decryption failed and plaintext fallback is disabled') ||
+        errorMsg.includes('Data failed validation') ||
+        errorMsg.includes('Fallback plaintext data failed validation')) {
+        throw error;
+      }
+      // For other errors, wrap them for context
+      throw new Error(`Failed to load ${filename}: ${errorMsg}`, { cause: error });
+    }
+  };
 
   return createPersistenceAdapter({
     async register(onChange) {
@@ -166,7 +302,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
 
       // Initial load and notify callback
       try {
-        const initialData = await this.load();
+        const initialData = await loadData();
         if (change_callback && initialData.items && initialData.items.length > 0) {
           await change_callback(initialData);
         }
@@ -174,104 +310,10 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
         console.warn(`Failed to load initial data for ${filename}:`, error);
       }
     },
-    async load() {
-      try {
-        // Atomic check and read to prevent TOCTOU race conditions
-        let contents: Uint8Array;
-        try {
-          contents = await readFile(filename, { baseDir: base_dir });
-        } catch (error) {
-          const msg = eMsg(error);
-          // Only return empty if the file truly doesn't exist
-          if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('no such file')) {
-            return { items: [] };
-          }
-          throw error; // Re-throw I/O errors, permission errors, etc.
-        }
-
-        const text_content = decoder.decode(contents);
-
-        if (!text_content.trim()) return { items: [] };
-
-        let decrypted_data: T[];
-
-        if (options?.decrypt) {
-          try {
-            decrypted_data = await options.decrypt(text_content);
-
-            // Validate decrypted data structure if validation is enabled
-            if (security.validateDecryptedData) {
-              const validator = security.dataValidator || defaultDataValidator;
-              if (!validator<T>(decrypted_data)) {
-                throw new Error('Decrypted data failed validation - corruption or tampering');
-              }
-            }
-          } catch (decryptError) {
-            const errorMsg = eMsg(decryptError);
-            if (!security.allowPlaintextFallback) {
-              throw new Error(
-                `Decryption failed, plaintext fallback disabled: ${errorMsg}`,
-                { cause: decryptError }
-              );
-            }
-
-            console.warn(
-              `[SECURITY] Decryption failed for ${filename}, trying plaintext fallback.`,
-              decryptError
-            );
-
-            try {
-              decrypted_data = JSON.parse(text_content);
-
-              // Validate even fallback data
-              if (security.validateDecryptedData) {
-                const validator = security.dataValidator || defaultDataValidator;
-                if (!validator<T>(decrypted_data)) {
-                  throw new Error('Fallback plaintext data failed validation');
-                }
-              }
-            } catch (parseError) {
-              const parseMsg = eMsg(parseError);
-              throw new Error(
-                `Decryption and plaintext parse both failed for ${filename}: ${parseMsg}`,
-                { cause: parseError }
-              );
-            }
-          }
-        } else {
-          try {
-            decrypted_data = JSON.parse(text_content);
-
-            // Validate data structure
-            if (security.validateDecryptedData) {
-              const validator = security.dataValidator || defaultDataValidator;
-              if (!validator<T>(decrypted_data)) {
-                throw new Error('Data failed validation - possible corruption');
-              }
-            }
-          } catch (parseError) {
-            const errorMsg = eMsg(parseError);
-            if (errorMsg.includes('validation')) {
-              throw parseError; // Re-throw validation errors as-is
-            }
-            return { items: [] }; // For backwards compatibility with corrupted JSON
-          }
-        }
-
-        return { items: decrypted_data };
-      } catch (error) {
-        const errorMsg = eMsg(error);
-        // For certain errors, propagate them directly
-        if (errorMsg.includes('Decryption failed and plaintext fallback is disabled') ||
-          errorMsg.includes('Data failed validation') ||
-          errorMsg.includes('Fallback plaintext data failed validation')) {
-          throw error;
-        }
-        // For other errors, wrap them for context
-        throw new Error(`Failed to load ${filename}: ${errorMsg}`, { cause: error });
-      }
-    },
+    load: loadData,
     async save(items, changes) {
+      // Chain onto the queue so concurrent saves run one at a time.
+      const run = async (): Promise<void> => {
       try {
         // Create backup before modifying data (only if enabled)
         let backup_filename: string | null = null;
@@ -284,7 +326,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
 
         // First, load current data if file exists
         try {
-          const current_data = await this.load();
+          const current_data = await loadData();
           current_items = current_data.items || [];
 
           // Create backup of current state (only if backups are enabled)
@@ -306,26 +348,28 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
           );
         }
 
-        // Apply changes incrementally
+        // Apply changes incrementally. SignalDB always passes changes,
+        // but normalize defensively so undefined/null cannot throw.
+        const safeChanges = changes ?? { added: [], modified: [], removed: [] };
         let updated_items = [...current_items];
 
         // Remove items first
-        if (changes.removed && changes.removed.length > 0) {
-          const removedIds = new Set(changes.removed.map(item => item.id));
+        if (safeChanges.removed && safeChanges.removed.length > 0) {
+          const removedIds = new Set(safeChanges.removed.map(item => item.id));
           updated_items = updated_items.filter(item => !removedIds.has(item.id));
         }
 
         // Update existing items
-        if (changes.modified && changes.modified.length > 0) {
-          const modifiedMap = new Map(changes.modified.map(item => [item.id, item]));
+        if (safeChanges.modified && safeChanges.modified.length > 0) {
+          const modifiedMap = new Map(safeChanges.modified.map(item => [item.id, item]));
           updated_items = updated_items.map(item =>
             modifiedMap.has(item.id) ? modifiedMap.get(item.id)! : item
           );
         }
 
         // Add new items
-        if (changes.added && changes.added.length > 0) {
-          updated_items.push(...changes.added);
+        if (safeChanges.added && safeChanges.added.length > 0) {
+          updated_items.push(...safeChanges.added);
         }
 
         // Verify the result matches the provided items array
@@ -396,7 +440,7 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
         if (is_registered && change_callback) {
           try {
             // Clone data to prevent mutation in callback
-            const callback_data = { items: JSON.parse(JSON.stringify(updated_items)) };
+            const callback_data = { items: cloneForCallback(updated_items) };
             await change_callback(callback_data);
           } catch (callbackError) {
             if (security.propagateCallbackErrors) {
@@ -414,6 +458,11 @@ export function createTauriFileSystemAdapter<T extends { id: ID } & Record<strin
         }
         throw new Error(`Failed to save ${filename}`, { cause: error });
       }
+      };
+      const pending = saveQueue.then(run, run);
+      // Keep the chain alive even if this save fails.
+      saveQueue = pending.catch(() => {});
+      return pending;
     },
     async unregister() {
       // Clean up the change callback when unregistering

@@ -199,6 +199,12 @@ class PerformanceTester {
     });
 
     this.collection = new Collection<TestData>({ persistence: this.adapter });
+
+    // SignalDB persists in the background and reports save failures through
+    // 'persistence.error'. Without a listener, that emit throws and can fail
+    // a throughput measurement that already recorded its numbers.
+    // Correctness is covered in test/, so swallow it here.
+    this.collection.on('persistence.error', () => {});
   }
 
   async initialize(): Promise<void> {
@@ -362,6 +368,9 @@ class NestedPerformanceTester {
     });
 
     this.collection = new Collection<NestedTestData>({ persistence: this.adapter });
+
+    // Same background-save guard as PerformanceTester above.
+    this.collection.on('persistence.error', () => {});
   }
 
   async initialize(): Promise<void> {
@@ -662,7 +671,9 @@ describe('Performance Tests', () => {
     const results: Array<{ size: number; time: number; avgTime: number; throughput: number }> = [];
 
     for (const size of sizes) {
-      mock_file_system.clear();
+      // No clear() here on purpose. Each size uses its own filename, and
+      // wiping the shared mock FS would delete temp files of saves still
+      // draining in the background (SignalDB persists asynchronously).
       const t = new PerformanceTester(`scale-${size}.json`);
       await t.initialize();
       const time = await t.testInsertPerformance(size);
@@ -679,7 +690,8 @@ describe('Performance Tests', () => {
     const results: Array<{ size: number; time: number; avgTime: number; throughput: number }> = [];
 
     for (const size of sizes) {
-      mock_file_system.clear();
+      // No clear() here on purpose. Same reason as the simple scaling test
+      // above: filenames are unique per size, background saves still drain.
       const t = new NestedPerformanceTester(`nested-scale-${size}.json`);
       await t.initialize();
       const time = await t.testNestedInsertPerformance(size);

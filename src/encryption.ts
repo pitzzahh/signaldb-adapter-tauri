@@ -17,7 +17,9 @@ const SALT_LENGTH = 16;
 /** AES-GCM IV/nonce length in bytes (96 bits) */
 const IV_LENGTH = 12;
 
-/** Default PBKDF2 iteration count (OWASP 2025 recommendation: 100k for SHA-256) */
+/** Default PBKDF2 iteration count. Minimum 100k for SHA-256; OWASP
+ * Password Storage recommends 600k. Raise via options.iterations
+ * if your devices can afford the startup cost. */
 const DEFAULT_ITERATIONS = 100_000;
 
 /** Separator between version prefix and payload */
@@ -91,7 +93,7 @@ async function deriveKey(
  *
  * Expected format: `v{version}:{base64payload}`
  * Returns `null` if the string is not in the expected format
- * (plaintext fallback — the caller should handle this gracefully).
+ * (plaintext fallback; the caller should handle this gracefully).
  */
 function parseVersionedPayload(
   raw: string,
@@ -123,11 +125,14 @@ function parseVersionedPayload(
 
 /**
  * Encode a binary payload into the versioned string format.
+ * Chunked to avoid O(n^2) concat and btoa stack limits on large payloads.
  */
 function encodeVersionedPayload(version: number, payload: Uint8Array): string {
+  const CHUNK = 0x2000;
   let binary = '';
-  for (let i = 0; i < payload.byteLength; i++) {
-    binary += String.fromCharCode(payload[i]);
+  for (let i = 0; i < payload.byteLength; i += CHUNK) {
+    const sub = payload.subarray(i, i + CHUNK);
+    binary += String.fromCharCode.apply(null, sub as unknown as number[]);
   }
   return `${VERSION_PREFIX}${version}${VERSION_SEPARATOR}${btoa(binary)}`;
 }
@@ -158,15 +163,21 @@ export function createEncryption(
     throw new Error(`Version must be a positive integer, got ${activeVersion}`);
   }
 
-  if (!passphraseMap[activeVersion]) {
+  const activePassphrase = passphraseMap[activeVersion];
+  if (typeof activePassphrase !== 'string' || activePassphrase.length === 0) {
     throw new Error(
       `No passphrase for version ${activeVersion}. Available: ${Object.keys(passphraseMap).join(', ')}`,
     );
   }
-
-  if (iterations < 10_000) {
+  if (activePassphrase.length < 12) {
     console.warn(
-      `[SECURITY] PBKDF2 iterations low (${iterations}). OWASP recommends >=100,000.`,
+      `[SECURITY] Passphrase for v${activeVersion} is short (${activePassphrase.length} chars). Use 12+ chars.`,
+    );
+  }
+
+  if (iterations < 100_000) {
+    console.warn(
+      `[SECURITY] PBKDF2 iterations low (${iterations}). Use >=100,000 (OWASP recommends 600,000).`,
     );
   }
 
@@ -208,7 +219,7 @@ export function createEncryption(
     if (payload.byteLength < SALT_LENGTH + IV_LENGTH + 16) {
       // Minimum: salt (16) + iv (12) + at least 1 byte ciphertext + 16 byte auth tag
       throw new Error(
-        'Payload too short — truncated or corrupted.',
+        'Payload too short: truncated or corrupted.',
       );
     }
 
@@ -234,7 +245,11 @@ export function createEncryption(
     }
 
     const plaintext = decoder.decode(decrypted);
-    return JSON.parse(plaintext);
+    const parsed_data: unknown = JSON.parse(plaintext);
+    if (!Array.isArray(parsed_data)) {
+      throw new Error('Decrypted payload is not an array: corrupted.');
+    }
+    return parsed_data;
   };
 
   return { encrypt, decrypt };
