@@ -2,9 +2,9 @@ name: Test
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'maintenance/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'maintenance/**']
     types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
