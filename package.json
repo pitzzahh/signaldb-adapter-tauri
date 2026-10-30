@@ -55,8 +55,8 @@
   },
   "devDependencies": {
     "@signaldb/core": "^1.8.1",
-    "@tauri-apps/plugin-fs": "^2.5.2",
-    "@types/bun": "^1.4.1",
+    "@tauri-apps/plugin-fs": "^2.7.1",
+    "@types/bun": "^1.4.4",
     "typescript": "^7.0.2"
   },
   "engines": {
