@@ -3,7 +3,8 @@
  * Covers: destructured methods, serialized saves, structuredClone
  * callbacks, stricter filenames, non-function encryption options,
  * undefined changes, non-array payloads, passphrase warnings,
- * large encrypted payloads, corrupt-file warnings, and rename failures.
+ * large encrypted payloads, corrupt-file warnings, and rename failures,
+ * and backup/verify/cleanup failure warnings.
  */
 import { test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { BaseDirectory } from '@tauri-apps/plugin-fs';
@@ -304,4 +305,138 @@ test('validateDecryptedData false returns raw JSON as-is', async () => {
   const result = await adapter.load();
   // Cast: validation is off, so the runtime value is intentionally not T[].
   expect(result.items as unknown as { a: number }).toEqual({ a: 1 });
+});
+// ─── Failure-path warnings (backup, verify, cleanup) ───
+
+// Short alias matching main's suite (older tests above use the full name).
+const createAdapter = createTauriFileSystemAdapter;
+
+test('Backup pruning failure warns but save succeeds', async () => {
+  const adapter = createAdapter<TestData>('prune-fail.json', {
+    security: { createBackups: true, maxBackups: 1 },
+  });
+  await adapter.register(mock());
+
+  // Seed two backups so pruning must remove the oldest.
+  const base = BaseDirectory.AppLocalData;
+  mock_file_system.set(`${base}/prune-fail.json.backup.b-new`, new TextEncoder().encode('x'));
+  mock_file_system.set(`${base}/prune-fail.json.backup.a-old`, new TextEncoder().encode('x'));
+
+  mock_remove.mockImplementationOnce(async () => {
+    throw new Error('remove failed');
+  });
+
+  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
+  await adapter.save(data, { added: data, modified: [], removed: [] });
+
+  expect(warnings.some((w) => w.includes('Failed to remove old backup'))).toBe(true);
+});
+
+test('Backup listing failure warns but save succeeds', async () => {
+  const adapter = createAdapter<TestData>('backup-list-fail.json', {
+    security: { createBackups: true },
+  });
+  await adapter.register(mock());
+
+  mock_read_dir.mockImplementationOnce(async () => {
+    throw new Error('readDir failed');
+  });
+
+  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
+  await adapter.save(data, { added: data, modified: [], removed: [] });
+
+  expect(warnings.some((w) => w.includes('Failed to cleanup old backups'))).toBe(true);
+});
+
+test('Decrypted data failing validation propagates without wrapping', async () => {
+  const adapter = createAdapter<TestData>('decrypt-invalid.json', {
+    decrypt: async () => ({ not: 'an-array' }) as any,
+  });
+  await adapter.register(mock());
+
+  // Anchored: a 'Failed to load' prefix would mean the error got wrapped.
+  await expect(adapter.load()).rejects.toThrow(/^Decryption failed, plaintext fallback disabled/);
+});
+
+test('Fallback plaintext failing validation reports both failures', async () => {
+  const adapter = createAdapter<TestData>('fallback-invalid.json', {
+    decrypt: async () => {
+      throw new Error('bad key');
+    },
+    security: { allowPlaintextFallback: true },
+  });
+  await adapter.register(mock());
+
+  // Valid JSON, but not an array: parses, then fails validation.
+  mock_file_system.set(
+    `${BaseDirectory.AppLocalData}/fallback-invalid.json`,
+    new TextEncoder().encode(JSON.stringify({ a: 1 }))
+  );
+
+  await expect(adapter.load()).rejects.toThrow('Decryption and plaintext parse both failed');
+});
+
+test('Register warns and continues when initial load fails', async () => {
+  const adapter = createAdapter<TestData>('register-load-fail.json');
+
+  mock_read_file.mockImplementationOnce(async () => {
+    throw new Error('EACCES: permission denied');
+  });
+
+  await adapter.register(mock());
+
+  expect(warnings.some((w) => w.includes('Failed to load initial data'))).toBe(true);
+});
+
+test('Backup creation failure warns but save succeeds', async () => {
+  const adapter = createAdapter<TestData>('backup-create-fail.json', {
+    security: { createBackups: true },
+  });
+  await adapter.register(mock());
+
+  // First write in the save flow is the backup write.
+  mock_write_file.mockImplementationOnce(async () => {
+    throw new Error('disk full');
+  });
+
+  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
+  await adapter.save(data, { added: data, modified: [], removed: [] });
+
+  expect(warnings.some((w) => w.includes('Failed to create backup'))).toBe(true);
+});
+
+test('Temp file verification mismatch warns but save succeeds', async () => {
+  const adapter = createAdapter<TestData>('verify-fail.json');
+  await adapter.register(mock());
+
+  // Simulate disk corruption: the temp write lands with different bytes,
+  // so the verify read does not match what was written.
+  mock_write_file.mockImplementationOnce(async (filename: string, _data: Uint8Array, options?: { baseDir?: BaseDirectory }) => {
+    const base_dir = options?.baseDir || BaseDirectory.AppLocalData;
+    mock_file_system.set(`${base_dir}/${filename}`, new TextEncoder().encode('tampered'));
+  });
+
+  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
+  await adapter.save(data, { added: data, modified: [], removed: [] });
+
+  expect(warnings.some((w) => w.includes('Failed to verify temporary file'))).toBe(true);
+});
+
+test('Temp cleanup failure after write error warns', async () => {
+  const adapter = createAdapter<TestData>('cleanup-fail.json');
+  await adapter.register(mock());
+
+  mock_rename_fn.mockImplementationOnce(async () => {
+    throw new Error('rename failed');
+  });
+  mock_remove.mockImplementationOnce(async () => {
+    throw new Error('remove failed');
+  });
+
+  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
+  await expect(
+    adapter.save(data, { added: data, modified: [], removed: [] })
+  ).rejects.toThrow('Failed to save cleanup-fail.json');
+
+  expect(warnings.some((w) => w.includes('Failed to cleanup temp file'))).toBe(true);
 });
