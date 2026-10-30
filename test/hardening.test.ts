@@ -8,8 +8,11 @@
  */
 import { test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { BaseDirectory } from '@tauri-apps/plugin-fs';
-import { createTauriFileSystemAdapter as createAdapter } from '../src/index';
+import { createTauriFileSystemAdapter } from '../src/index';
 import { createEncryption } from '../src/encryption';
+
+// Short alias used by the failure-path tests below (matches main's suite).
+const createAdapter = createTauriFileSystemAdapter;
 
 interface TestData {
   id: string;
