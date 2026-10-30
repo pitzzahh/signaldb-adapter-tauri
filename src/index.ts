@@ -254,7 +254,7 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
     } catch (error) {
       const errorMsg = eMsg(error);
       // For certain errors, propagate them directly
-      if (errorMsg.includes('Decryption failed and plaintext fallback is disabled') ||
+      if (errorMsg.includes('Decryption failed, plaintext fallback disabled') ||
         errorMsg.includes('Data failed validation') ||
         errorMsg.includes('Fallback plaintext data failed validation')) {
         throw error;
