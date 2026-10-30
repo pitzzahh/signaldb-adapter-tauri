@@ -112,6 +112,15 @@ test('decrypt throws on plain base64 without version', async () => {
   );
 });
 
+test('decrypt throws on versioned payload with invalid base64', async () => {
+  const { decrypt } = createEncryption('test-passphrase');
+
+  // Valid prefix, version, and shape, but '!!!' is not base64: atob throws.
+  await expect(decrypt('v1:!!!')).rejects.toThrow(
+    'Invalid encrypted payload',
+  );
+});
+
 // ─── Key rotation ────────────────────────────────────────────────────────
 
 test('key rotation: encrypt with new key, decrypt with both versions', async () => {
