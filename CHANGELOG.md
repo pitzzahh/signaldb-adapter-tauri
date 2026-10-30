@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.1.8] — Publish retry hardening
+
+### Fixed
+- **Flaky releases on Sigstore errors**: the publish workflow now retries `npm publish` up to 3 times with backoff, and re-checks the registry after each failure so an upload that landed despite the error counts as done.
+
 ## [2.1.7] — Security hardening backport
 
 Backports the 2.2.0 data-safety fixes and 2.4.0 adapter hardening to the 2.1.x line (which has no built-in encryption module, so passphrase/payload items do not apply). No API changes. Error and warning message wording now matches newer 2.x releases.
