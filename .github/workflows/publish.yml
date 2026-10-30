@@ -77,8 +77,26 @@ jobs:
           echo "$BODY" > /tmp/release-body.md
           echo "body_file=/tmp/release-body.md" >> $GITHUB_OUTPUT
 
-      - run: npm publish --provenance --access public --tag "${{ steps.check.outputs.tag }}"
+      # Sigstore Rekor 409s are transient; retry with re-probe (see 2.4.1 release).
+      - name: Publish to npm (retries Sigstore flakes)
         if: steps.check.outputs.should_publish == 'true'
+        run: |
+          for attempt in 1 2 3; do
+            if npm publish --provenance --access public --tag "${{ steps.check.outputs.tag }}"; then
+              exit 0
+            fi
+            VERSION="${{ steps.check.outputs.version }}"
+            if npm view "@pitzzahh/signaldb-adapter-tauri@${VERSION}" version 2>/dev/null | grep -qF "$VERSION"; then
+              echo "Version $VERSION is already on the registry; treating publish as done."
+              exit 0
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "Publish failed after 3 attempts."
+              exit 1
+            fi
+            echo "Publish attempt $attempt failed; retrying in 60 seconds."
+            sleep 60
+          done
 
       - uses: softprops/action-gh-release@v3
         if: steps.check.outputs.should_publish == 'true' && github.event_name != 'release'
