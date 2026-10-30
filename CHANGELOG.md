@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.4.1]: Decrypt error passthrough fix
+
+### Fixed
+- **Wrapped decryption errors**: the load wrapper matched pre-2.3 wording, so decryption failures came back wrapped in `Failed to load` instead of propagating directly. Now matches the current message.
+
+### Changed
+- Dev dependencies refreshed to latest stable (`plugin-fs` 2.7.1, `@types/bun` 1.4.4); peer ranges unchanged.
+
+### Added
+- Regression tests for backup, temp-file, and decrypt failure paths (9 tests).
+
 ## [2.4.0]: Save queue and validation hardening
 
 ### Fixed
