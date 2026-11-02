@@ -1,5 +1,32 @@
 # Changelog
 
+## [3.1.0]: Fail-closed saves and leaner bundle
+
+### Fail-closed behavior changes
+- **Saves to corrupt files are refused** (`src/index.ts`). `load()` still returns empty for corrupt plaintext JSON (backwards compat), but `save()` now throws `Refusing to save…` instead of overwriting the corrupt bytes.
+- **`encrypt` and `decrypt` must be provided together** (`src/index.ts`). Half-configured encryption previously wrote ciphertext that `load()` could not parse, losing data on the next save. Construction now throws when only one is given.
+- **Temp-file verification mismatch fails the save** (`src/index.ts`). A proven content mismatch previously warned and renamed the bad bytes over the good file; it now warns and throws, leaving the original intact.
+
+### Fixed
+- **`maxBackups: 0` ignored** (`src/index.ts`): `|| 5` turned an explicit `0` into `5`; now `?? 5`, so zero keeps no backups.
+- **Stale same-id disk content kept on save** (`src/index.ts`): `save()` persists the `items` array directly instead of re-merging incremental changes. Re-merging could only reproduce `items` or keep stale disk content when IDs matched; removing it also drops an O(n) merge plus two ID-set builds per save.
+
+### Changed
+- **Concurrent save bursts coalesce** (`src/index.ts`): a queued save superseded by a newer call skips its write; the newest call persists the latest state. Sequential saves are unaffected.
+- **Change callbacks no longer block saves** (`src/index.ts`): with default `propagateCallbackErrors: false`, async subscribers settle after the save (data is still `structuredClone`d). Set `propagateCallbackErrors: true` to await and propagate callback errors as before.
+- **`createEncryption` caches PBKDF2 key material per passphrase** (`src/encryption.ts`): `importKey` runs once per passphrase instead of per message; per-message `deriveKey` (random salts) is unchanged.
+- **PBKDF2 iteration count is immutable per store** (`README.md`, `src/types.ts`): documented that the count is not stored in the payload header, so changing it later makes existing files undecryptable.
+
+### Package
+- `package.json` `build` cleans `dist/` first (stale `dist/src/*.d.ts` no longer ship), `size` gates both bundles, `prepublishOnly`/`test:watch`/`test:coverage` scope to `test/` (the bench no longer runs in the publish gate).
+- Dropped the `@tauri-apps/api` peer dependency (never imported; `plugin-fs` already depends on it) and refreshed the lockfile (`plugin-fs` 2.7.1).
+- Bundle sizes: `dist/index.js` 5.89 KB, `dist/encryption.js` 2.54 KB (minified).
+
+### Tests
+- 10 previously floating `expect().rejects` assertions now `await`, so they actually gate their tests.
+- New coverage: corrupt-save refusal, half-encryption construction, `maxBackups: 0`, stale-disk overwrite, same-id upsert, cross-iteration decrypt failure, real `Collection` round-trip, and a real-AES-GCM bench case.
+- Removed 4 duplicated/debug-only tests and dead `open` mocks.
+
 ## [3.0.1]: Stronghold passphrase docs
 
 ### Added

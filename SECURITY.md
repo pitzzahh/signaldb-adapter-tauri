@@ -6,7 +6,8 @@ We actively maintain and provide security updates for the following versions of 
 
 | Version | Supported          | Notes                                         |
 | ------- | ------------------ | --------------------------------------------- |
-| 3.0.x   | :white_check_mark: | Latest stable, recommended                    |
+| 3.1.x   | :white_check_mark: | Latest stable, recommended                    |
+| 3.0.x   | :white_check_mark: | Still supported                               |
 | 2.4.x   | :white_check_mark: | Still supported                               |
 | 2.3.x   | :white_check_mark: | Still supported (hardening backported: 2.3.1) |
 | 2.2.x   | :warning:          | Critical security fixes only (patched: 2.2.2) |
@@ -17,6 +18,7 @@ We actively maintain and provide security updates for the following versions of 
 
 ### Security Features by Version
 
+- **v3.1.0+**: Fail-closed saves (corrupt-file and temp-verify refusal), half-configured encryption rejected at construction
 - **v3.0.0+**: Same hardening as v2.4.x; slimmer API (`adapter`, encryption subpath)
 - **v2.4.0+**: Serialized saves, stricter filenames, passphrase warnings
 - **v2.1.0+**: Comprehensive security hardening with encryption enforcement, path traversal protection, and data validation
@@ -135,7 +137,7 @@ try {
 - All data is stored locally using Tauri's secure filesystem API
 - Files are written atomically to prevent corruption
 - Optional encryption protects data at rest
-- Automatic backups prevent data loss
+- Optional automatic backups prevent data loss
 
 ### Path Security
 - Filename sanitization prevents path traversal attacks
@@ -166,4 +168,4 @@ For general questions, please use [GitHub Issues](https://github.com/pitzzahh/si
 
 ---
 
-*This security policy is reviewed quarterly and updated as needed. Last updated: October 29, 2026*
+*This security policy is reviewed quarterly and updated as needed. Last updated: October 31, 2026*

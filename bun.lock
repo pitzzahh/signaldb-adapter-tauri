@@ -12,7 +12,6 @@
       },
       "peerDependencies": {
         "@signaldb/core": "1.x",
-        "@tauri-apps/api": "2.x",
         "@tauri-apps/plugin-fs": "2.x",
       },
     },
