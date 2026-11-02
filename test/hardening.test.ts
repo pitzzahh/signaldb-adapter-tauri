@@ -70,7 +70,6 @@ mock.module('@tauri-apps/plugin-fs', () => ({
   writeFile: mock_write_file,
   remove: mock_remove,
   rename: mock_rename_fn,
-  open: mock(async () => ({ write: mock(), close: mock(), truncate: mock() })),
 }));
 
 let originalWarn: typeof console.warn;
@@ -133,6 +132,7 @@ test('Concurrent saves serialize: last queued write wins exactly', async () => {
 test('A failed save does not break the queue for later saves', async () => {
   const adapter = createAdapter<TestData>('queue-recovery.json', {
     encrypt: async () => { throw new Error('boom'); },
+    decrypt: async (encrypted) => JSON.parse(encrypted),
   });
   await adapter.register(mock()).catch(() => {});
   // Register fails (encrypt throws on init), but save queue must still settle.
@@ -348,16 +348,18 @@ test('Backup listing failure warns but save succeeds', async () => {
 
 test('Decrypted data failing validation propagates without wrapping', async () => {
   const adapter = createAdapter<TestData>('decrypt-invalid.json', {
+    encrypt: async (data) => JSON.stringify(data),
     decrypt: async () => ({ not: 'an-array' }) as any,
   });
   await adapter.register(mock());
 
   // Anchored: a 'Failed to load' prefix would mean the error got wrapped.
-  await expect(adapter.load()).rejects.toThrow(/^Decryption failed, plaintext fallback disabled/);
+  expect(adapter.load()).rejects.toThrow(/^Decryption failed, plaintext fallback disabled/);
 });
 
 test('Fallback plaintext failing validation reports both failures', async () => {
   const adapter = createAdapter<TestData>('fallback-invalid.json', {
+    encrypt: async (data) => JSON.stringify(data),
     decrypt: async () => {
       throw new Error('bad key');
     },
@@ -371,7 +373,7 @@ test('Fallback plaintext failing validation reports both failures', async () => 
     new TextEncoder().encode(JSON.stringify({ a: 1 }))
   );
 
-  await expect(adapter.load()).rejects.toThrow('Decryption and plaintext parse both failed');
+  expect(adapter.load()).rejects.toThrow('Decryption and plaintext parse both failed');
 });
 
 test('Register warns and continues when initial load fails', async () => {
@@ -403,7 +405,7 @@ test('Backup creation failure warns but save succeeds', async () => {
   expect(warnings.some((w) => w.includes('Failed to create backup'))).toBe(true);
 });
 
-test('Temp file verification mismatch warns but save succeeds', async () => {
+test('Temp file verification mismatch warns and fails the save', async () => {
   const adapter = createAdapter<TestData>('verify-fail.json');
   await adapter.register(mock());
 
@@ -415,9 +417,18 @@ test('Temp file verification mismatch warns but save succeeds', async () => {
   });
 
   const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
-  await adapter.save(data, { added: data, modified: [], removed: [] });
+  expect(
+    adapter.save(data, { added: data, modified: [], removed: [] })
+  ).rejects.toThrow('Failed to save verify-fail.json');
 
   expect(warnings.some((w) => w.includes('Failed to verify temporary file'))).toBe(true);
+  // No temp leftovers, and the original file is untouched.
+  const leftovers = Array.from(mock_file_system.keys()).filter((k) => k.includes('.tmp.'));
+  expect(leftovers).toEqual([]);
+  const raw = new TextDecoder().decode(
+    mock_file_system.get(`${BaseDirectory.AppLocalData}/verify-fail.json`)!
+  );
+  expect(raw).toBe('[]');
 });
 
 test('Temp cleanup failure after write error warns', async () => {
@@ -432,9 +443,98 @@ test('Temp cleanup failure after write error warns', async () => {
   });
 
   const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
-  await expect(
+  expect(
     adapter.save(data, { added: data, modified: [], removed: [] })
   ).rejects.toThrow('Failed to save cleanup-fail.json');
 
   expect(warnings.some((w) => w.includes('Failed to cleanup temp file'))).toBe(true);
+});
+
+// ─── Audit fixes: fail-closed saves ───
+
+test('Save refuses to overwrite a corrupt file', async () => {
+  const corrupt = '{truncated-partial-data';
+  mock_file_system.set(
+    `${BaseDirectory.AppLocalData}/corrupt-save.json`,
+    new TextEncoder().encode(corrupt)
+  );
+  const adapter = createAdapter<TestData>('corrupt-save.json');
+
+  // load() still returns empty for backwards compat...
+  const loaded = await adapter.load();
+  expect(loaded.items).toEqual([]);
+
+  // ...but save() refuses instead of destroying the corrupt bytes.
+  const data: TestData[] = [{ id: '1', name: 'new', value: 1 }];
+  expect(
+    adapter.save(data, { added: data, modified: [], removed: [] })
+  ).rejects.toThrow('Refusing to save');
+
+  const raw = new TextDecoder().decode(
+    mock_file_system.get(`${BaseDirectory.AppLocalData}/corrupt-save.json`)!
+  );
+  expect(raw).toBe(corrupt);
+});
+
+test('Half-configured encryption throws at construction', () => {
+  expect(() => createAdapter<TestData>('half-enc.json', {
+    encrypt: async (data) => JSON.stringify(data),
+  })).toThrow('encrypt and decrypt must be provided together.');
+
+  expect(() => createAdapter<TestData>('half-dec.json', {
+    decrypt: async (encrypted) => JSON.parse(encrypted),
+  })).toThrow('encrypt and decrypt must be provided together.');
+});
+
+test('maxBackups:0 keeps no backups', async () => {
+  const adapter = createAdapter<TestData>('no-backups.json', {
+    security: { createBackups: true, maxBackups: 0 },
+  });
+  await adapter.register(mock());
+
+  const base = BaseDirectory.AppLocalData;
+  mock_file_system.set(`${base}/no-backups.json.backup.old-1`, new TextEncoder().encode('x'));
+  mock_file_system.set(`${base}/no-backups.json.backup.old-2`, new TextEncoder().encode('x'));
+
+  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
+  await adapter.save(data, { added: data, modified: [], removed: [] });
+
+  const backups = Array.from(mock_file_system.keys()).filter((k) =>
+    k.includes('no-backups.json.backup.')
+  );
+  expect(backups).toEqual([]);
+});
+
+test('save with undefined changes overwrites stale disk data', async () => {
+  const stale: TestData[] = [{ id: '1', name: 'OLD', value: 1 }];
+  mock_file_system.set(
+    `${BaseDirectory.AppLocalData}/stale.json`,
+    new TextEncoder().encode(JSON.stringify(stale))
+  );
+  const adapter = createAdapter<TestData>('stale.json');
+
+  const fresh: TestData[] = [{ id: '1', name: 'NEW', value: 2 }];
+  // @ts-expect-error testing runtime hardening
+  await adapter.save(fresh, undefined);
+
+  const result = await adapter.load();
+  expect(result.items).toEqual(fresh);
+});
+
+test('added items upsert instead of duplicating same-id entries', async () => {
+  const adapter = createAdapter<TestData>('upsert.json');
+  await adapter.register(mock());
+
+  const initial: TestData[] = [{ id: '1', name: 'one', value: 1 }];
+  await adapter.save(initial, { added: initial, modified: [], removed: [] });
+
+  // 'added' re-states an existing id: must replace, not duplicate.
+  const next: TestData[] = [
+    { id: '1', name: 'one-updated', value: 10 },
+    { id: '2', name: 'two', value: 2 },
+  ];
+  await adapter.save(next, { added: next, modified: [], removed: [] });
+
+  const result = await adapter.load();
+  expect(result.items).toEqual(next);
 });
