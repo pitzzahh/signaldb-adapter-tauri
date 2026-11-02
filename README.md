@@ -6,7 +6,7 @@
 
 Filesystem persistence for [SignalDB](https://github.com/maxnowack/signaldb) in Tauri apps. One line per collection, with optional AES-256-GCM encryption.
 
-5.86 KB minified (adapter only, 2.46 KB for encryption). Zero runtime dependencies.
+5.89 KB minified (adapter only, 2.54 KB for encryption). Zero runtime dependencies.
 
 ## Install
 
@@ -80,7 +80,7 @@ const secure = adapter('secure-data.json', {
 });
 ```
 
-`createEncryption` uses AES-256-GCM with PBKDF2 key derivation (100k iterations by default, configurable). Each write gets a fresh salt and IV, so identical data never produces identical files. Tampered files fail decryption instead of loading garbage.
+`createEncryption` uses AES-256-GCM with PBKDF2 key derivation (100k iterations by default, configurable). Each write gets a fresh salt and IV, so identical data never produces identical files. Tampered files fail decryption instead of loading garbage. Pick the iteration count once per store: it is not stored in the file header, so raising it later makes existing files undecryptable.
 
 Key rotation uses versioned passphrases. Old versions keep decrypting legacy files while new writes use the current key:
 
@@ -162,8 +162,8 @@ Why this shape: the vault password is the only secret the user must remember, an
 ## Behavior worth knowing
 
 - **Atomic writes.** Each save goes to a temp file, then renames over the original. A crash mid-write leaves the previous version intact.
-- **Serialized saves.** Concurrent `save()` calls run in order through a queue, so they cannot interleave read-modify-write and drop updates.
-- **Missing files start empty.** A corrupt plaintext file loads as empty with a loud console warning. Encrypted files fail loudly instead of guessing.
+- **Serialized saves.** Concurrent `save()` calls run in order through a queue, so they cannot interleave read-modify-write and drop updates. A burst of concurrent saves coalesces: skipped intermediates resolve normally and the newest call persists the latest state.
+- **Missing files start empty.** A corrupt plaintext file loads as empty with a loud console warning, but saves to it are refused until the file is fixed or removed. Encrypted files fail loudly instead of guessing.
 - **Flat filenames only.** No paths, no `..`, no reserved device names (`CON`, `NUL`, ...). One file per collection, in one base directory.
 - **Backups are off by default.** Frequent sync writes would pile up backup files, so set `security.createBackups: true` only if you want timestamped copies before each save.
 - **Data validation is on by default.** Decrypted data must be an array unless you supply a custom `dataValidator` or disable the check.
@@ -180,8 +180,8 @@ Why this shape: the vault password is the only secret the user must remember, an
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `base_dir` | `BaseDirectory` | `AppLocalData` | Tauri base directory for file storage |
-| `encrypt` | `(data: T[]) => Promise<string>` | `undefined` | Custom encryption function |
-| `decrypt` | `(encrypted: string) => Promise<T[]>` | `undefined` | Custom decryption function |
+| `encrypt` | `(data: T[]) => Promise<string>` | `undefined` | Custom encryption function (requires `decrypt`) |
+| `decrypt` | `(encrypted: string) => Promise<T[]>` | `undefined` | Custom decryption function (requires `encrypt`) |
 | `security` | `Partial<SecurityOptions>` | `{}` | Security configuration options |
 
 ```typescript

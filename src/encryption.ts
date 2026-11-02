@@ -4,7 +4,7 @@
  * On-disk format: `v{version}:{base64(salt || iv || ciphertext+authTag)}`
  */
 
-import type { EncryptionOptions } from './types';
+import type { EncryptedPayload, EncryptionOptions } from './types';
 import { eMsg, encoder, decoder } from './utils';
 
 /** Salt length in bytes (128 bits) */
@@ -39,21 +39,13 @@ function concat(...arrays: Uint8Array[]): Uint8Array {
 }
 
 /**
- * Derive an AES-256-GCM key from a passphrase using PBKDF2.
+ * Derive an AES-256-GCM key from key material using PBKDF2.
  */
 async function deriveKey(
-  passphrase: string,
+  keyMaterial: CryptoKey,
   salt: BufferSource,
   iterations: number,
 ): Promise<CryptoKey> {
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(passphrase),
-    'PBKDF2',
-    false,
-    ['deriveKey'],
-  );
-
   return crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
@@ -75,9 +67,7 @@ async function deriveKey(
  * Returns `null` if the string is not in the expected format
  * (plaintext fallback; the caller should handle this gracefully).
  */
-function parseVersionedPayload(
-  raw: string,
-): { version: number; payload: Uint8Array } | null {
+function parseVersionedPayload(raw: string): EncryptedPayload | null {
   // Must start with 'v' and contain the separator
   if (!raw.startsWith(VERSION_PREFIX)) return null;
 
@@ -162,12 +152,30 @@ export function createEncryption(
     );
   }
 
+  // importKey per passphrase is cached: deriveKey still runs per message
+  // (salts are random), but the redundant import is paid once.
+  const keyMaterialCache = new Map<string, Promise<CryptoKey>>();
+  const getKeyMaterial = (passphrase: string): Promise<CryptoKey> => {
+    let cached = keyMaterialCache.get(passphrase);
+    if (!cached) {
+      cached = crypto.subtle.importKey(
+        'raw',
+        encoder.encode(passphrase),
+        'PBKDF2',
+        false,
+        ['deriveKey'],
+      );
+      keyMaterialCache.set(passphrase, cached);
+    }
+    return cached;
+  };
+
   const encrypt = async <T>(data: T[]): Promise<string> => {
     const passphrase = passphraseMap[activeVersion];
     const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
     const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
 
-    const key = await deriveKey(passphrase, salt, iterations);
+    const key = await deriveKey(await getKeyMaterial(passphrase), salt, iterations);
 
     const plaintext = encoder.encode(JSON.stringify(data));
     // AES-GCM appends the 16-byte authentication tag to the ciphertext
@@ -204,11 +212,11 @@ export function createEncryption(
       );
     }
 
-    const salt = payload.slice(0, SALT_LENGTH);
-    const iv = payload.slice(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
-    const ciphertext = payload.slice(SALT_LENGTH + IV_LENGTH);
+    const salt = payload.subarray(0, SALT_LENGTH);
+    const iv = payload.subarray(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
+    const ciphertext = payload.subarray(SALT_LENGTH + IV_LENGTH);
 
-    const key = await deriveKey(passphrase, salt, iterations);
+    const key = await deriveKey(await getKeyMaterial(passphrase), salt, iterations);
 
     let decrypted: ArrayBuffer;
     try {

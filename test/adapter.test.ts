@@ -34,24 +34,6 @@ const mock_write_file = mock(async (filename: string, data: Uint8Array, options?
   mock_file_system.set(full_path, data);
 });
 
-const mock_open = mock(async (filename: string, options: { write?: boolean; create?: boolean; baseDir?: BaseDirectory }) => {
-  const base_dir = options.baseDir || BaseDirectory.AppLocalData;
-  const full_path = `${base_dir}/${filename}`;
-
-  return {
-    write: mock(async (data: Uint8Array) => {
-      mock_file_system.set(full_path, data);
-    }),
-    truncate: mock(async () => {
-      // Mock truncate - clear the file
-      mock_file_system.set(full_path, new Uint8Array(0));
-    }),
-    close: mock(async () => {
-      // Mock close - no-op
-    }),
-  };
-});
-
 const mock_remove = mock(async (filename: string, options?: { baseDir?: BaseDirectory }): Promise<void> => {
   const base_dir = options?.baseDir || BaseDirectory.AppLocalData;
   const full_path = `${base_dir}/${filename}`;
@@ -89,7 +71,6 @@ mock.module('@tauri-apps/plugin-fs', () => ({
   readFile: mock_read_file,
   readDir: mock_read_dir,
   writeFile: mock_write_file,
-  open: mock_open,
   remove: mock_remove,
   rename: mock_rename_fn,
 }));
@@ -106,7 +87,6 @@ beforeEach(() => {
   mock_exists.mockClear();
   mock_read_file.mockClear();
   mock_write_file.mockClear();
-  mock_open.mockClear();
   mock_remove.mockClear();
   mock_read_dir.mockClear();
   mock_rename_fn.mockClear();
@@ -137,7 +117,6 @@ test('Basic adapter functionality', () => {
 
   // Test that adapter is created with correct interface
   expect(adapter).toBeDefined();
-  if (!adapter) return;
 
   expect(adapter).toHaveProperty('register');
   expect(adapter).toHaveProperty('load');
@@ -149,7 +128,6 @@ test('Basic adapter functionality', () => {
 
 test('Register creates initial empty file in AppLocalData', async () => {
   const adapter = createAdapter<TestData>('test.json');
-  if (!adapter) return;
 
   // Before register, file should not exist
   expect(mock_file_system.has(`${BaseDirectory.AppLocalData}/test.json`)).toBe(false);
@@ -170,7 +148,6 @@ test('Register creates initial empty file in AppLocalData', async () => {
 
 test('Register does not overwrite existing file', async () => {
   const adapter = createAdapter<TestData>('test.json');
-  if (!adapter) return;
 
   // Pre-populate the mock filesystem with existing data
   const existing_data = '[{"id": "1", "name": "existing"}]';
@@ -190,7 +167,6 @@ test('Register does not overwrite existing file', async () => {
 
 test('Save and load data correctly', async () => {
   const adapter = createAdapter<TestData>('users.json');
-  if (!adapter) return;
 
   const test_data: TestData[] = [
     { id: '1', name: 'John Doe', value: 100 },
@@ -220,7 +196,6 @@ test('Uses custom base directory', async () => {
   const adapter = createAdapter<TestData>('config.json', {
     base_dir: BaseDirectory.AppConfig
   });
-  if (!adapter) return;
 
   await adapter.register(() => { });
 
@@ -238,7 +213,6 @@ test('Uses custom base directory', async () => {
 
 test('Load handles non-existent file', async () => {
   const adapter = createAdapter<TestData>('nonexistent.json');
-  if (!adapter) return;
 
   // File should not exist in filesystem
   expect(mock_file_system.has(`${BaseDirectory.AppLocalData}/nonexistent.json`)).toBe(false);
@@ -252,21 +226,9 @@ test('Load handles non-existent file', async () => {
 
 test('Load handles empty file', async () => {
   const adapter = createAdapter<TestData>('empty.json');
-  if (!adapter) return;
 
   // Create empty file in mock filesystem
   mock_file_system.set(`${BaseDirectory.AppLocalData}/empty.json`, new TextEncoder().encode(''));
-
-  const result = await adapter.load();
-  expect(result.items).toEqual([]);
-});
-
-test('Load handles corrupted JSON gracefully', async () => {
-  const adapter = createAdapter<TestData>('corrupted.json');
-  if (!adapter) return;
-
-  // Create file with invalid JSON in mock filesystem
-  mock_file_system.set(`${BaseDirectory.AppLocalData}/corrupted.json`, new TextEncoder().encode('invalid json'));
 
   const result = await adapter.load();
   expect(result.items).toEqual([]);
@@ -277,7 +239,6 @@ test('Encryption creates encrypted files', async () => {
     encrypt: async (data) => btoa(JSON.stringify(data)),
     decrypt: async (encrypted) => JSON.parse(atob(encrypted)),
   });
-  if (!adapter) return;
 
   const test_data: TestData[] = [
     { id: '1', name: 'Secret Data', value: 123 }
@@ -307,7 +268,6 @@ test('Encryption creates encrypted files', async () => {
 test('Multiple adapters with different files', async () => {
   const users_adapter = createAdapter<TestData>('users.json');
   const settings_adapter = createAdapter<TestData>('settings.json');
-  if (!users_adapter || !settings_adapter) return;
 
   const user_data: TestData[] = [{ id: '1', name: 'User', value: 1 }];
   const settings_data: TestData[] = [{ id: '1', name: 'Theme', value: 2 }];
@@ -346,8 +306,8 @@ test('Handles save errors gracefully', async () => {
       }
       return JSON.stringify(data); // Normal encryption for register
     },
+    decrypt: async (encrypted) => JSON.parse(encrypted),
   });
-  if (!adapter) return;
 
   const test_data: TestData[] = [{ id: '1', name: 'Test', value: 100 }];
 
@@ -361,7 +321,7 @@ test('Handles save errors gracefully', async () => {
   should_fail_encryption = true;
 
   // Should throw error on save due to encryption failure
-  expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] })).rejects.toThrow('Failed to save test.json');
+  await expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] })).rejects.toThrow('Failed to save test.json');
 });
 
 test('Handles register encryption errors gracefully', async () => {
@@ -369,54 +329,18 @@ test('Handles register encryption errors gracefully', async () => {
     encrypt: async () => {
       throw new Error('Encryption failed during register');
     },
+    decrypt: async (encrypted) => JSON.parse(encrypted),
   });
-  if (!adapter) return;
 
   // Register should fail due to encryption error
-  expect(adapter.register(() => { })).rejects.toThrow('Failed to initialize file register-error-test.json');
+  await expect(adapter.register(() => { })).rejects.toThrow('Failed to initialize file register-error-test.json');
 
   // File should not exist since register failed
   expect(mock_file_system.has(`${BaseDirectory.AppLocalData}/register-error-test.json`)).toBe(false);
 });
 
-// Helper function to inspect the mock filesystem state
-function get_mock_file_system_state() {
-  const state: Record<string, string> = {};
-  for (const [path, content] of mock_file_system.entries()) {
-    state[path] = new TextDecoder().decode(content);
-  }
-  return state;
-}
-
-test('Mock filesystem state inspection', async () => {
-  const adapter_1 = createAdapter<TestData>('app1.json');
-  const adapter_2 = createAdapter<TestData>('app2.json', {
-    base_dir: BaseDirectory.AppConfig
-  });
-  if (!adapter_1 || !adapter_2) return;
-
-  await adapter_1.register(() => { });
-  await adapter_2.register(() => { });
-
-  await adapter_1.save([{ id: '1', name: 'App1 Data', value: 1 }], { added: [{ id: '1', name: 'App1 Data', value: 1 }], modified: [], removed: [] });
-  await adapter_2.save([{ id: '2', name: 'App2 Data', value: 2 }], { added: [{ id: '2', name: 'App2 Data', value: 2 }], modified: [], removed: [] });
-
-  const state = get_mock_file_system_state();
-
-  console.log('Mock filesystem state:', state);
-  console.log('Available keys:', Object.keys(state));
-
-  // Should have files in both directories
-  expect(Object.keys(state)).toContain(`${BaseDirectory.AppLocalData}/app1.json`);
-  expect(Object.keys(state)).toContain(`${BaseDirectory.AppConfig}/app2.json`);
-
-  expect(state[`${BaseDirectory.AppLocalData}/app1.json`]).toBe('[{"id":"1","name":"App1 Data","value":1}]');
-  expect(state[`${BaseDirectory.AppConfig}/app2.json`]).toBe('[{"id":"2","name":"App2 Data","value":2}]');
-});
-
 test('Change callback is called on save', async () => {
   const adapter = createAdapter<TestData>('callback-test.json');
-  if (!adapter) return;
 
   let callback_data: any = null;
   const on_change = mock((data?: any) => {
@@ -438,7 +362,6 @@ test('Change callback is called on save', async () => {
 
 test('Unregister cleans up properly', async () => {
   const adapter = createAdapter<TestData>('unregister-test.json');
-  if (!adapter) return;
 
   let callback_called = false;
   const on_change = mock(() => {
@@ -463,31 +386,8 @@ test('Unregister cleans up properly', async () => {
   expect(callback_called).toBe(false);
 });
 
-test('Initial data callback on register', async () => {
-  // Pre-populate the mock filesystem with existing data
-  const existing_data = '[{"id": "1", "name": "existing", "value": 123}]';
-  mock_file_system.set(`${BaseDirectory.AppLocalData}/initial-callback-test.json`, new TextEncoder().encode(existing_data));
-
-  const adapter = createAdapter<TestData>('initial-callback-test.json');
-  if (!adapter) return;
-
-  let callback_data: any = null;
-  const on_change = mock((data?: any) => {
-    callback_data = data;
-  });
-
-  await adapter.register(on_change);
-
-  // Verify the callback was called with initial data
-  expect(on_change).toHaveBeenCalled();
-  expect(callback_data).toEqual({
-    items: [{ id: "1", name: "existing", value: 123 }]
-  });
-});
-
 test('Save uses incremental changes correctly', async () => {
   const adapter = createAdapter<TestData>('incremental-test.json');
-  if (!adapter) return;
 
   // Initial data
   const initial_data: TestData[] = [
@@ -525,7 +425,6 @@ test('Save uses incremental changes correctly', async () => {
 
 test('Save handles empty changes gracefully', async () => {
   const adapter = createAdapter<TestData>('empty-changes-test.json');
-  if (!adapter) return;
 
   const test_data: TestData[] = [
     { id: '1', name: 'Test Item', value: 100 }
@@ -540,34 +439,34 @@ test('Save handles empty changes gracefully', async () => {
   expect(result.items).toEqual(test_data);
 });
 
-test('Save falls back to full save on mismatch', async () => {
-  const adapter = createAdapter<TestData>('fallback-test.json');
-  if (!adapter) return;
+test('Real SignalDB Collection round-trip persists mutations and reloads', async () => {
+  const { Collection } = await import('@signaldb/core');
+  const adapter = createAdapter<TestData>('collection.json');
+  const collection = new Collection<TestData>({ persistence: adapter });
+  const errors: unknown[] = [];
+  collection.on('persistence.error', (error: unknown) => { errors.push(error); });
+  await collection.isReady();
 
-  // Initial data
-  const initial_data: TestData[] = [
-    { id: '1', name: 'Item 1', value: 100 }
-  ];
+  await collection.insert({ id: '1', name: 'one', value: 1 });
+  await collection.insert({ id: '2', name: 'two', value: 2 });
+  collection.updateOne({ id: '1' }, { $set: { value: 10 } });
+  collection.removeOne({ id: '2' });
 
-  await adapter.register(() => { });
-  await adapter.save(initial_data, { added: initial_data, modified: [], removed: [] });
+  // Persistence runs in the background; poll the file until it converges.
+  const expected: TestData[] = [{ id: '1', name: 'one', value: 10 }];
+  for (let i = 0; ; i++) {
+    const { items } = await adapter.load();
+    if (JSON.stringify(items) === JSON.stringify(expected)) break;
+    if (i === 200) throw new Error('timed out waiting for persistence');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  expect(errors).toEqual([]);
 
-  // Create a mismatch scenario - changes don't match final items
-  const final_items: TestData[] = [
-    { id: '1', name: 'Item 1', value: 100 },
-    { id: '2', name: 'Item 2', value: 200 },
-    { id: '3', name: 'Item 3', value: 300 }
-  ];
-
-  const incorrect_changes = {
-    added: [{ id: '2', name: 'Item 2', value: 200 }], // Missing item 3
-    modified: [],
-    removed: []
-  };
-
-  // Should fall back to saving the complete final_items array
-  await adapter.save(final_items, incorrect_changes);
-
-  const result = await adapter.load();
-  expect(result.items).toEqual(final_items);
+  // A fresh collection over the same file reloads the persisted state.
+  const adapter2 = createAdapter<TestData>('collection.json');
+  const collection2 = new Collection<TestData>({ persistence: adapter2 });
+  await collection2.isReady();
+  expect(collection2.find({}).fetch()).toEqual(expected);
 });
+
+

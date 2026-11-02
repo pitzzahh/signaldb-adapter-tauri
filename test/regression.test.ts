@@ -67,7 +67,6 @@ mock.module('@tauri-apps/plugin-fs', () => ({
   writeFile: mock_write_file,
   remove: mock_remove,
   rename: mock_rename_fn,
-  open: mock(async () => ({ write: mock(), close: mock(), truncate: mock() })),
 }));
 
 const { adapter: createAdapter } = await import('../src/index');

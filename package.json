@@ -1,19 +1,19 @@
 {
   "name": "@pitzzahh/signaldb-adapter-tauri",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "A SignalDB persistence adapter for Tauri apps with optional encryption support",
   "module": "dist/index.js",
   "type": "module",
   "sideEffects": false,
   "scripts": {
-    "build": "bun build src/index.ts src/encryption.ts --outdir dist --target browser --minify --external @signaldb/core --external @tauri-apps/plugin-fs --external @tauri-apps/api && tsc --declaration --emitDeclarationOnly --outDir dist",
+    "build": "rm -rf dist && bun build src/index.ts src/encryption.ts --outdir dist --target browser --minify --external @signaldb/core --external @tauri-apps/plugin-fs && tsc --declaration --emitDeclarationOnly --outDir dist",
     "typecheck": "tsc --noEmit",
-    "size": "bun run build && node -e \"const fs=require('fs');const b=fs.statSync('dist/index.js').size;const g=require('zlib').gzipSync(fs.readFileSync('dist/index.js')).length;console.log('bundle: '+b+' B, gzip: '+g+' B');if(b>15360){console.error('Bundle too large: '+b+' B > 15360 B');process.exit(1)}\"",
+    "size": "bun run build && node -e \"const fs=require('fs');const z=require('zlib');for(const f of ['dist/index.js','dist/encryption.js']){const b=fs.statSync(f).size;const g=z.gzipSync(fs.readFileSync(f)).length;console.log(f+': '+b+' B, gzip: '+g+' B');if(b>15360){console.error('Bundle too large: '+f+' '+b+' B > 15360 B');process.exit(1)}}\"",
     "test": "bun test test/",
-    "test:watch": "bun test --watch",
-    "test:coverage": "bun test --coverage",
+    "test:watch": "bun test --watch test/",
+    "test:coverage": "bun test --coverage test/",
     "bench": "bun test scripts/bench.test.ts",
-    "prepublishOnly": "bun run build && bun run typecheck && bun test"
+    "prepublishOnly": "bun run build && bun run typecheck && bun run test"
   },
   "repository": {
     "type": "git",
@@ -54,7 +54,6 @@
   ],
   "peerDependencies": {
     "@signaldb/core": "1.x",
-    "@tauri-apps/api": "2.x",
     "@tauri-apps/plugin-fs": "2.x"
   },
   "devDependencies": {

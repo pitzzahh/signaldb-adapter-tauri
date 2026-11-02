@@ -15,9 +15,12 @@ import {
 import type { SecurityOptions, AdapterOptions } from './types';
 import { eMsg, encoder, decoder } from './utils';
 
-/** Clone for change callback – structuredClone keeps Date/Map. */
-function cloneForCallback<T>(items: T[]): T[] {
-  return structuredClone(items);
+/** Marks present-but-unreadable files so save() refuses to overwrite them. */
+class CorruptDataError extends Error {
+  constructor(filename: string, cause: unknown) {
+    super(`Corrupt data in ${filename}`, { cause });
+    this.name = 'CorruptDataError';
+  }
 }
 
 /**
@@ -34,10 +37,10 @@ function validateFilename(filename: string): void {
     throw new Error('Invalid filename: path traversal detected');
   }
 
-  // Check for other dangerous characters: null, newlines, control chars,
-  // and characters illegal on Windows (< > : " | ? *)
+  // Check for other dangerous characters: null bytes, control chars
+  // (includes \n and \r), and characters illegal on Windows (< > : " | ? *)
   // eslint-disable-next-line no-control-regex
-  if (/[\0-\x1f<>:"|?*]/.test(filename) || filename.includes('\n') || filename.includes('\r')) {
+  if (/[\0-\x1f<>:"|?*]/.test(filename)) {
     throw new Error('Invalid filename: illegal or control characters');
   }
 
@@ -85,16 +88,17 @@ async function cleanupOldBackups(
     const backup_pattern = `${filename}.backup.`;
     const backup_entries = entries
       .filter(entry => entry.name.startsWith(backup_pattern))
-      .sort((a, b) => b.name.localeCompare(a.name)); // newest first (ISO timestamps sort lexicographically)
+      // Newest first (ISO timestamps sort lexicographically; plain compare, no locale cost)
+      .sort((a, b) => (a.name < b.name ? 1 : a.name > b.name ? -1 : 0));
 
-    // Remove oldest backups beyond the limit
-    for (let i = maxBackups; i < backup_entries.length; i++) {
+    // Remove oldest backups beyond the limit, in parallel
+    await Promise.all(backup_entries.slice(maxBackups).map(async (entry) => {
       try {
-        await remove(backup_entries[i].name, { baseDir });
+        await remove(entry.name, { baseDir });
       } catch (removeError) {
-        console.warn(`Failed to remove old backup ${backup_entries[i].name}:`, removeError);
+        console.warn(`Failed to remove old backup ${entry.name}:`, removeError);
       }
-    }
+    }));
   } catch (error) {
     console.warn(`Failed to cleanup old backups for ${filename}:`, error);
   }
@@ -150,24 +154,36 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
     );
   }
 
+  // Reject half-configured encryption: encrypt without decrypt writes
+  // ciphertext that load() cannot parse, losing data on the next save.
+  if ((options?.encrypt != null) !== (options?.decrypt != null)) {
+    throw new Error(
+      'encrypt and decrypt must be provided together.',
+    );
+  }
+
   let change_callback: ((data?: LoadResponse<T>) => void | Promise<void>) | null = null;
   let is_registered = false;
   // Serialize saves so concurrent save() calls cannot interleave
   // read-modify-write and lose updates. Each save chains onto the last.
   let saveQueue: Promise<void> = Promise.resolve();
+  // Monotonic save id for write coalescing (see save()).
+  let saveSeq = 0;
 
   // Standalone loader so register/save do not depend on `this`.
   // Keeps working even if adapter methods are destructured.
-  const loadData = async (): Promise<LoadResponse<T>> => {
+  // Throws CorruptDataError on corrupt files; save() relies on that to
+  // refuse overwriting them, while load() maps it to empty (see below).
+  const loadDataInternal = async (): Promise<LoadResponse<T>> => {
     try {
       // Atomic check and read to prevent TOCTOU race conditions
       let contents: Uint8Array;
       try {
         contents = await readFile(filename, { baseDir: base_dir });
       } catch (error) {
-        const msg = eMsg(error);
+        const msg = eMsg(error).toLowerCase();
         // Only return empty if the file truly doesn't exist
-        if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('no such file')) {
+        if (msg.includes('not found') || msg.includes('no such file')) {
           return { items: [] };
         }
         throw error; // Re-throw I/O errors, permission errors, etc.
@@ -175,7 +191,8 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
 
       const text_content = decoder.decode(contents);
 
-      if (!text_content.trim()) return { items: [] };
+      // No-copy blank check (trim() would copy multi-MB files)
+      if (text_content.length === 0 || !/\S/.test(text_content)) return { items: [] };
 
       let decrypted_data: T[];
 
@@ -238,20 +255,15 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
           if (errorMsg.includes('validation')) {
             throw parseError; // Re-throw validation errors as-is
           }
-          // Backwards compat: corrupt JSON loads as empty, but warn loudly
-          // so corruption is not silent. The next save refuses to overwrite
-          // when it cannot read, so this does not cause silent data loss.
-          console.warn(
-            `[DATA] Corrupt JSON in ${filename}, loading as empty. ` +
-            `Inspect the file; remove it if you intend a reset.`,
-            parseError,
-          );
-          return { items: [] };
+          // Fail closed: load() maps this to empty for backwards compat,
+          // but save() refuses to overwrite the corrupt file.
+          throw new CorruptDataError(filename, parseError);
         }
       }
 
       return { items: decrypted_data };
     } catch (error) {
+      if (error instanceof CorruptDataError) throw error;
       const errorMsg = eMsg(error);
       // For certain errors, propagate them directly
       if (errorMsg.includes('Decryption failed, plaintext fallback disabled') ||
@@ -261,6 +273,25 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
       }
       // For other errors, wrap them for context
       throw new Error(`Failed to load ${filename}: ${errorMsg}`, { cause: error });
+    }
+  };
+
+  // Public load: corrupt files load as empty (backwards compat) but warn
+  // loudly; saves stay blocked until the file is fixed or removed.
+  const loadData = async (): Promise<LoadResponse<T>> => {
+    try {
+      return await loadDataInternal();
+    } catch (error) {
+      if (error instanceof CorruptDataError) {
+        console.warn(
+          `[DATA] Corrupt JSON in ${filename}, loading as empty. ` +
+          `Inspect the file; remove it if you intend a reset. ` +
+          `Saves are blocked until the file is fixed or removed.`,
+          error.cause ?? error,
+        );
+        return { items: [] };
+      }
+      throw error;
     }
   };
 
@@ -300,9 +331,13 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
       }
     },
     load: loadData,
-    async save(items, changes) {
+    async save(items, _changes) {
       // Chain onto the queue so concurrent saves run one at a time.
+      // Coalescing: a queued save superseded by a newer call skips its
+      // write; the newest call always persists the latest full state.
+      const save_id = ++saveSeq;
       const run = async (): Promise<void> => {
+      if (save_id !== saveSeq) return; // superseded, newer save will persist
       try {
         // Create backup before modifying data (only if enabled)
         let backup_filename: string | null = null;
@@ -310,13 +345,10 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
           backup_filename = createBackupFilename(filename);
         }
 
-        // Use incremental updates with the changes parameter for better performance
-        let current_items: T[] = [];
-
-        // First, load current data if file exists
+        // Guard read: refuse the save when the stored file is unreadable
+        // or corrupt, so a save can never overwrite data it cannot see.
         try {
-          const current_data = await loadData();
-          current_items = current_data.items || [];
+          await loadDataInternal();
 
           // Create backup of current state (only if backups are enabled)
           if (security.createBackups && backup_filename) {
@@ -325,7 +357,7 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
               await writeFile(backup_filename, current_content, { baseDir: base_dir });
 
               // Clean up old backups
-              await cleanupOldBackups(filename, security.maxBackups || 5, base_dir);
+              await cleanupOldBackups(filename, security.maxBackups ?? 5, base_dir);
             } catch (backupError) {
               console.warn(`Failed to create backup ${backup_filename}:`, backupError);
             }
@@ -337,40 +369,10 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
           );
         }
 
-        // Apply changes incrementally. SignalDB always passes changes,
-        // but normalize defensively so undefined/null cannot throw.
-        const safeChanges = changes ?? { added: [], modified: [], removed: [] };
-        let updated_items = [...current_items];
-
-        // Remove items first
-        if (safeChanges.removed && safeChanges.removed.length > 0) {
-          const removedIds = new Set(safeChanges.removed.map(item => item.id));
-          updated_items = updated_items.filter(item => !removedIds.has(item.id));
-        }
-
-        // Update existing items
-        if (safeChanges.modified && safeChanges.modified.length > 0) {
-          const modifiedMap = new Map(safeChanges.modified.map(item => [item.id, item]));
-          updated_items = updated_items.map(item =>
-            modifiedMap.has(item.id) ? modifiedMap.get(item.id)! : item
-          );
-        }
-
-        // Add new items
-        if (safeChanges.added && safeChanges.added.length > 0) {
-          updated_items.push(...safeChanges.added);
-        }
-
-        // Verify the result matches the provided items array
-        // This ensures data integrity
-        const expected_ids = new Set(items.map(item => item.id));
-        const actual_ids = new Set(updated_items.map(item => item.id));
-
-        if (expected_ids.size !== actual_ids.size ||
-          ![...expected_ids].every(id => actual_ids.has(id))) {
-          console.warn('Incremental update mismatch, using full save');
-          updated_items = items;
-        }
+        // SignalDB always passes the full current state as items; persist
+        // it directly instead of re-merging incremental changes. Re-merging
+        // could only reproduce items or keep stale same-id disk content.
+        const updated_items = items;
 
         let data_to_save: string;
 
@@ -393,16 +395,19 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
             baseDir: base_dir
           });
 
-          // Verify the temporary file was written correctly
+          // Verify the temporary file was written correctly. A proven
+          // content mismatch fails closed; a mere read-back I/O error warns.
+          let temp_text: string | null = null;
           try {
             const temp_contents = await readFile(temp_filename, { baseDir: base_dir });
-            const temp_text = decoder.decode(temp_contents);
-            if (temp_text !== data_to_save) {
-              throw new Error('Temp file verification failed');
-            }
+            temp_text = decoder.decode(temp_contents);
           } catch (verifyError) {
-            // If verification fails, continue anyway for compatibility
             console.warn(`Failed to verify temporary file ${temp_filename}:`, verifyError);
+          }
+          if (temp_text !== null && temp_text !== data_to_save) {
+            const mismatch = new Error('Temp file verification failed: content mismatch');
+            console.warn(`Failed to verify temporary file ${temp_filename}:`, mismatch);
+            throw mismatch;
           }
 
           // Atomically replace the old file with the new one using rename
@@ -427,15 +432,25 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
 
         // Notify callback about the change if registered
         if (is_registered && change_callback) {
-          try {
-            // Clone data to prevent mutation in callback
-            const callback_data = { items: cloneForCallback(updated_items) };
-            await change_callback(callback_data);
-          } catch (callbackError) {
-            if (security.propagateCallbackErrors) {
+          // Clone data to prevent mutation in callback (structuredClone keeps Date/Map)
+          const callback_data = { items: structuredClone(updated_items) };
+          const cb = change_callback;
+          if (security.propagateCallbackErrors) {
+            try {
+              await cb(callback_data);
+            } catch (callbackError) {
               throw new Error(`Change callback failed for ${filename}`, { cause: callbackError });
-            } else {
+            }
+          } else {
+            // Fire-and-forget: async subscribers settle after the save.
+            const onErr = (callbackError: unknown) => {
               console.warn(`Change callback error for ${filename}:`, callbackError);
+            };
+            try {
+              const result = cb(callback_data);
+              if (result instanceof Promise) result.catch(onErr);
+            } catch (callbackError) {
+              onErr(callbackError);
             }
           }
         }
