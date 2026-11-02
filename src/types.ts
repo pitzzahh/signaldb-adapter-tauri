@@ -6,7 +6,7 @@ export interface EncryptedPayload {
   /** Key version number for key rotation support */
   version: number;
   /** Binary payload: salt (16B) + IV (12B) + AES-256-GCM ciphertext + auth tag */
-  payload: Uint8Array;
+  payload: Uint8Array<ArrayBuffer>;
 }
 
 export interface SecurityOptions {
@@ -46,6 +46,8 @@ export interface EncryptionOptions {
   /**
    * Number of PBKDF2 iterations.
    * OWASP 2025 recommends >=100,000 for SHA-256.
+   * Immutable per store: the count is not stored in the payload header,
+   * so changing it later makes existing files undecryptable.
    * @default 100_000
    */
   iterations?: number;
