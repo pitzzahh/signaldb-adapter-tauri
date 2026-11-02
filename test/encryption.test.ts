@@ -203,6 +203,14 @@ test('warns on low iteration count', () => {
   expect(warnings.some((w) => w.includes('PBKDF2'))).toBe(true);
 });
 
+test('decrypt with different iterations fails', async () => {
+  const enc = createEncryption('cross-iteration-passphrase', { iterations: 100_000 });
+  const encrypted = await enc.encrypt([{ id: '1' }]);
+
+  const dec = createEncryption('cross-iteration-passphrase', { iterations: 200_000 });
+  await expect(dec.decrypt(encrypted)).rejects.toThrow('Decryption failed');
+});
+
 test('complex nested data structures survive round-trip', async () => {
   const { encrypt, decrypt } = createEncryption('nested-test');
 

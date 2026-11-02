@@ -70,7 +70,6 @@ mock.module('@tauri-apps/plugin-fs', () => ({
   writeFile: mock_write_file,
   remove: mock_remove,
   rename: mock_rename_fn,
-  open: mock(async () => ({ write: mock(), close: mock(), truncate: mock() })),
 }));
 
 const { adapter: createAdapter } = await import('../src/index');
@@ -465,7 +464,7 @@ test('Custom dataValidator rejects invalid shapes', async () => {
     security: { validateDecryptedData: true, dataValidator: validator },
   });
 
-  expect(adapter.load()).rejects.toThrow('Data failed validation');
+  await expect(adapter.load()).rejects.toThrow('Data failed validation');
 });
 
 // ═══════════════════════════════════════════

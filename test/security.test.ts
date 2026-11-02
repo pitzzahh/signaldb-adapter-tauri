@@ -74,7 +74,6 @@ mock.module('@tauri-apps/plugin-fs', () => ({
   writeFile: mock_write_file,
   remove: mock_remove,
   rename: mock_rename_fn,
-  open: mock(async () => ({ write: mock(), close: mock(), truncate: mock() })),
 }));
 
 // Global warning suppression for cleaner test output
@@ -191,7 +190,7 @@ test('Security: Decryption failure with no fallback throws error', async () => {
     security: { allowPlaintextFallback: false }
   });
 
-  expect(adapter.load()).rejects.toThrow('Decryption failed, plaintext fallback disabled');
+  await expect(adapter.load()).rejects.toThrow('Decryption failed, plaintext fallback disabled');
 });
 
 test('Security: Data validation fails on corrupted data', async () => {
@@ -220,7 +219,7 @@ test('Security: Data validation fails on corrupted data', async () => {
     }
   });
 
-  expect(adapter.load()).rejects.toThrow('Data failed validation');
+  await expect(adapter.load()).rejects.toThrow('Data failed validation');
 });
 
 test('Security: Callback errors propagate when enabled', async () => {
@@ -236,7 +235,7 @@ test('Security: Callback errors propagate when enabled', async () => {
 
   const test_data: TestData[] = [{ id: '1', name: 'test', value: 42 }];
 
-  expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] }))
+  await expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] }))
     .rejects.toThrow('Change callback failed');
 });
 

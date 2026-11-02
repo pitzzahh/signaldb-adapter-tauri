@@ -666,6 +666,33 @@ describe('Performance Tests', () => {
     expect(isValidTiming(unencryptedTime)).toBe(true);
   });
 
+  test('Real AES-GCM save cost (per-save PBKDF2 derivation)', async () => {
+    const { createEncryption } = await import('../src/encryption');
+    // NOTE: 1k iterations keep the bench fast; production uses >=100k.
+    // This measures throughput shape (key derivation runs per save),
+    // not absolute production crypto cost.
+    const { encrypt, decrypt } = createEncryption('bench-passphrase-real-crypto', { iterations: 1000 });
+    const adapter = createAdapter<TestData>('bench-real-crypto.json', { encrypt, decrypt });
+    await adapter.register(() => {});
+
+    const itemCount = 20;
+    const startTime = performance.now();
+    for (let i = 0; i < itemCount; i++) {
+      const item: TestData = { id: `item-${i}`, name: `Item ${i}`, data: 'x'.repeat(100) };
+      await adapter.save([item], { added: [item], modified: [], removed: [] });
+    }
+    const elapsed = performance.now() - startTime;
+
+    formatPerformanceTable('Real AES-GCM Save Cost (20 saves)', [
+      { label: 'Saves completed', value: itemCount },
+      { label: 'Total time', value: elapsed, unit: 'ms' },
+      { label: 'Average per save', value: elapsed / itemCount, unit: 'ms' },
+      { label: 'Throughput', value: itemCount / (elapsed / 1000), unit: 'saves/sec' }
+    ]);
+
+    expect(isValidTiming(elapsed)).toBe(true);
+  });
+
   test('Scaling: insert performance (100→1000)', async () => {
     const sizes = [DATASET_SIZES.SMALL, DATASET_SIZES.MEDIUM, DATASET_SIZES.LARGE];
     const results: Array<{ size: number; time: number; avgTime: number; throughput: number }> = [];
