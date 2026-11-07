@@ -102,6 +102,8 @@ function restoreWarnings() {
 
 beforeEach(() => {
   mock_file_system.clear();
+  mock_write_file.mockClear();
+  mock_rename_fn.mockClear();
   captureWarnings();
 });
 
@@ -110,72 +112,67 @@ afterEach(() => {
 });
 
 // ═══════════════════════════════════════════
-// Register edge cases
+// Setup edge cases
 // ═══════════════════════════════════════════
 
-test('Register with non-existent base directory still works (Tauri creates it)', async () => {
+test('Setup with non-existent base directory still works (Tauri creates it)', async () => {
   const adapter = createAdapter<TestData>('fresh.json');
-  await adapter.register(mock());
+  await adapter.setup();
   expect(fileExists('fresh.json')).toBe(true);
 });
 
-test('Register twice with same adapter is idempotent', async () => {
+test('Setup twice with same adapter is idempotent', async () => {
   const adapter = createAdapter<TestData>('double.json');
-  await adapter.register(mock());
+  await adapter.setup();
   const after_first = readFile('double.json');
 
-  await adapter.register(mock());
+  await adapter.setup();
   const after_second = readFile('double.json');
 
   expect(after_first).toBe(after_second);
 });
 
-test('Register then load immediately returns empty array', async () => {
+test('Setup then readAll immediately returns empty array', async () => {
   const adapter = createAdapter<TestData>('empty-check.json');
-  await adapter.register(mock());
-  const result = await adapter.load();
-  expect(result.items).toEqual([]);
+  await adapter.setup();
+  expect(await adapter.readAll()).toEqual([]);
 });
 
-test('Register does not call callback when file is empty', async () => {
-  let called = false;
-  const adapter = createAdapter<TestData>('no-callback.json');
-  await adapter.register(() => { called = true; });
-  expect(called).toBe(false);
+test('Teardown resolves', async () => {
+  const adapter = createAdapter<TestData>('teardown.json');
+  await adapter.setup();
+  await expect(adapter.teardown()).resolves.toBeUndefined();
 });
 
 // ═══════════════════════════════════════════
-// Load edge cases
+// Read edge cases
 // ═══════════════════════════════════════════
 
-test('Load without register returns empty array gracefully', async () => {
+test('readAll without setup returns empty array gracefully', async () => {
   const adapter = createAdapter<TestData>('unregistered.json');
-  const result = await adapter.load();
-  expect(result.items).toEqual([]);
+  expect(await adapter.readAll()).toEqual([]);
 });
 
-test('Load with only whitespace in file returns empty', async () => {
+test('readAll with only whitespace in file returns empty', async () => {
   mock_file_system.set(
     `${BaseDirectory.AppLocalData}/whitespace.json`,
     new TextEncoder().encode('   \n\t  ')
   );
   const adapter = createAdapter<TestData>('whitespace.json');
-  const result = await adapter.load();
-  expect(result.items).toEqual([]);
+  expect(await adapter.readAll()).toEqual([]);
 });
 
-test('Load file with a single item', async () => {
+test('readAll file with a single item', async () => {
   const item: TestData = { id: 'only', name: 'lonely', value: 1 };
   mock_file_system.set(
     `${BaseDirectory.AppLocalData}/single.json`,
     new TextEncoder().encode(JSON.stringify([item]))
   );
   const adapter = createAdapter<TestData>('single.json');
-  const result = await adapter.load();
-  expect(result.items).toEqual([item]);
+  expect(await adapter.readAll()).toEqual([item]);
 });
 
-test('Load file with many items', async () => {
+test('readAll file with many items', async () => {
   const items: TestData[] = Array.from({ length: 1000 }, (_, i) => ({
     id: `item-${i}`,
     name: `Name ${i}`,
@@ -186,127 +183,116 @@ test('Load file with many items', async () => {
     new TextEncoder().encode(JSON.stringify(items))
   );
   const adapter = createAdapter<TestData>('many.json');
-  const result = await adapter.load();
-  expect(result.items).toEqual(items);
-  expect(result.items!.length).toBe(1000);
+  const result = await adapter.readAll();
+  expect(result).toEqual(items);
+  expect(result.length).toBe(1000);
 });
 
 // ═══════════════════════════════════════════
-// Save edge cases
+// Write edge cases
 // ═══════════════════════════════════════════
 
-test('Save with only modified items (no added/removed)', async () => {
+test('Replace-only update keeps other items', async () => {
   const adapter = createAdapter<TestData>('mod-only.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   // Seed data
   const initial: TestData[] = [
     { id: '1', name: 'orig', value: 10 },
     { id: '2', name: 'orig2', value: 20 },
   ];
-  await adapter.save(initial, { added: initial, modified: [], removed: [] });
+  await adapter.insert(initial);
 
   // Modify only
-  const modified: TestData[] = [
-    { id: '1', name: 'CHANGED', value: 999 },
-  ];
-  const expected: TestData[] = [
+  await adapter.replace([{ id: '1', name: 'CHANGED', value: 999 }]);
+
+  expect(await adapter.readAll()).toEqual([
     { id: '1', name: 'CHANGED', value: 999 },
     { id: '2', name: 'orig2', value: 20 },
-  ];
-  await adapter.save(expected, { added: [], modified, removed: [] });
-
-  const result = await adapter.load();
-  expect(result.items).toEqual(expected);
+  ]);
 });
 
-test('Save with only removed items (no added/modified)', async () => {
+test('Remove-only update keeps other items', async () => {
   const adapter = createAdapter<TestData>('rem-only.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   const initial: TestData[] = [
     { id: '1', name: 'keep', value: 1 },
     { id: '2', name: 'gone', value: 2 },
     { id: '3', name: 'keep2', value: 3 },
   ];
-  await adapter.save(initial, { added: initial, modified: [], removed: [] });
+  await adapter.insert(initial);
 
-  const removed: TestData[] = [{ id: '2', name: 'gone', value: 2 }];
-  const expected: TestData[] = [
+  await adapter.remove([{ id: '2', name: 'gone', value: 2 }]);
+
+  expect(await adapter.readAll()).toEqual([
     { id: '1', name: 'keep', value: 1 },
     { id: '3', name: 'keep2', value: 3 },
-  ];
-  await adapter.save(expected, { added: [], modified: [], removed });
-
-  const result = await adapter.load();
-  expect(result.items).toEqual(expected);
+  ]);
 });
 
-test('Save all three change types simultaneously', async () => {
+test('Insert, replace and remove in sequence', async () => {
   const adapter = createAdapter<TestData>('all-changes.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   const initial: TestData[] = [
     { id: '1', name: 'modify-me', value: 1 },
     { id: '2', name: 'remove-me', value: 2 },
     { id: '3', name: 'keep-me', value: 3 },
   ];
-  await adapter.save(initial, { added: initial, modified: [], removed: [] });
+  await adapter.insert(initial);
 
-  const expected: TestData[] = [
+  await adapter.insert([{ id: '4', name: 'NEW', value: 4 }]);
+  await adapter.replace([{ id: '1', name: 'MODIFIED', value: 999 }]);
+  await adapter.remove([{ id: '2', name: 'remove-me', value: 2 }]);
+
+  expect(await adapter.readAll()).toEqual([
     { id: '1', name: 'MODIFIED', value: 999 },
     { id: '3', name: 'keep-me', value: 3 },
     { id: '4', name: 'NEW', value: 4 },
-  ];
-  await adapter.save(expected, {
-    added: [{ id: '4', name: 'NEW', value: 4 }],
-    modified: [{ id: '1', name: 'MODIFIED', value: 999 }],
-    removed: [{ id: '2', name: 'remove-me', value: 2 }],
-  });
-
-  const result = await adapter.load();
-  expect(result.items).toEqual(expected);
+  ]);
 });
 
-test('Removing a non-existent item is a no-op', async () => {
+test('Removing a non-existent item skips the rewrite', async () => {
   const adapter = createAdapter<TestData>('remove-non-existent.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   const initial: TestData[] = [{ id: '1', name: 'only', value: 1 }];
-  await adapter.save(initial, { added: initial, modified: [], removed: [] });
+  await adapter.insert(initial);
 
+  mock_write_file.mockClear();
   // Try to remove an item that doesn't exist
-  await adapter.save(initial, {
-    added: [],
-    modified: [],
-    removed: [{ id: 'phantom', name: 'ghost', value: -1 }],
-  });
+  await adapter.remove([{ id: 'phantom', name: 'ghost', value: -1 }]);
 
-  const result = await adapter.load();
-  expect(result.items).toEqual(initial);
+  expect(mock_write_file).not.toHaveBeenCalled();
+  expect(await adapter.readAll()).toEqual(initial);
 });
 
-test('Modifying a non-existent item is ignored', async () => {
+test('Replacing a non-existent item upserts it', async () => {
   const adapter = createAdapter<TestData>('mod-non-existent.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   const initial: TestData[] = [{ id: '1', name: 'only', value: 1 }];
-  await adapter.save(initial, { added: initial, modified: [], removed: [] });
+  await adapter.insert(initial);
 
-  const expected: TestData[] = [
+  await adapter.replace([{ id: '2', name: 'upserted', value: 2 }]);
+
+  expect(await adapter.readAll()).toEqual([
     { id: '1', name: 'only', value: 1 },
-    { id: '2', name: 'unexpected', value: 2 },
-  ];
+    { id: '2', name: 'upserted', value: 2 },
+  ]);
+});
 
-  // Try to modify phantom; integrity check should catch mismatch → full save
-  await adapter.save(expected, {
-    added: [{ id: '2', name: 'unexpected', value: 2 }],
-    modified: [{ id: 'phantom', name: 'ghost', value: -1 }],
-    removed: [],
-  });
+test('Inserting an existing id overwrites instead of duplicating', async () => {
+  const adapter = createAdapter<TestData>('insert-upsert.json');
+  await adapter.setup();
 
-  const result = await adapter.load();
-  expect(result.items).toEqual(expected);
+  await adapter.insert([{ id: '1', name: 'orig', value: 1 }]);
+  await adapter.insert([{ id: '1', name: 'overwritten', value: 2 }]);
+
+  expect(await adapter.readAll()).toEqual([
+    { id: '1', name: 'overwritten', value: 2 },
+  ]);
 });
 
 // ═══════════════════════════════════════════
@@ -315,7 +301,7 @@ test('Modifying a non-existent item is ignored', async () => {
 
 test('Round-trip data with optional fields', async () => {
   const adapter = createAdapter<TestData>('optional.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   const items: TestData[] = [
     { id: '1', name: 'full', value: 1, extra: 'bonus', nested: { key: 'a', count: 1 }, tags: ['important'] },
@@ -323,14 +309,13 @@ test('Round-trip data with optional fields', async () => {
     { id: '3', name: 'partial', value: 3, extra: 'just-extra' },
     { id: '4', name: 'nested', value: 4, nested: { key: 'deep', count: 42 } },
   ];
-  await adapter.save(items, { added: items, modified: [], removed: [] });
-  const result = await adapter.load();
-  expect(result.items).toEqual(items);
+  await adapter.insert(items);
+  expect(await adapter.readAll()).toEqual(items);
 });
 
 test('Round-trip data with special characters in strings', async () => {
   const adapter = createAdapter<TestData>('special.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   const items: TestData[] = [
     { id: '1', name: 'new\nline', value: 1 },
@@ -341,9 +326,8 @@ test('Round-trip data with special characters in strings', async () => {
     { id: '6', name: 'emoji 🎉 fire 🔥', value: 6 },
     { id: '7', name: '日本語 한국어 العربية', value: 7 },
   ];
-  await adapter.save(items, { added: items, modified: [], removed: [] });
-  const result = await adapter.load();
-  expect(result.items).toEqual(items);
+  await adapter.insert(items);
+  expect(await adapter.readAll()).toEqual(items);
 });
 
 interface DeepData {
@@ -353,7 +337,7 @@ interface DeepData {
 
 test('Round-trip deeply nested JSON structures', async () => {
   const adapter = createAdapter<DeepData>('deep.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   const deep: Record<string, any> = {};
   let current: Record<string, any> = deep;
@@ -365,15 +349,15 @@ test('Round-trip deeply nested JSON structures', async () => {
 
   const items: DeepData[] = [{ id: 'deep', tree: deep }];
 
-  await adapter.save(items, { added: items, modified: [], removed: [] });
-  const result = await adapter.load();
-  expect(result.items).toEqual(items);
-  expect((result.items![0] as DeepData).tree.l1.l2.l3.l4.l5.l6.l7.l8.l9.l10.value).toBe('bottom');
+  await adapter.insert(items);
+  const result = await adapter.readAll();
+  expect(result).toEqual(items);
+  expect((result[0] as DeepData).tree.l1.l2.l3.l4.l5.l6.l7.l8.l9.l10.value).toBe('bottom');
 });
 
 test('Large single item with big string payload', async () => {
   const adapter = createAdapter<TestData>('big-payload.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   const huge_string = 'x'.repeat(100_000);
   const items: TestData[] = [
@@ -381,19 +365,18 @@ test('Large single item with big string payload', async () => {
     { id: 'small', name: 'tiny', value: 2 },
   ];
 
-  await adapter.save(items, { added: items, modified: [], removed: [] });
-  const result = await adapter.load();
-  expect(result.items).toEqual(items);
-  expect((result.items![0] as TestData).name.length).toBe(100_000);
+  await adapter.insert(items);
+  const result = await adapter.readAll();
+  expect(result).toEqual(items);
+  expect((result[0] as TestData).name.length).toBe(100_000);
 });
 
-test('Zero items save is valid', async () => {
+test('Empty insert is a valid no-op', async () => {
   const adapter = createAdapter<TestData>('zero.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
-  await adapter.save([], { added: [], modified: [], removed: [] });
-  const result = await adapter.load();
-  expect(result.items).toEqual([]);
+  await adapter.insert([]);
+  expect(await adapter.readAll()).toEqual([]);
 });
 
 // ═══════════════════════════════════════════
@@ -405,22 +388,21 @@ test('Encryption round-trip with all edge cases', async () => {
     encrypt: async (data) => btoa(unescape(encodeURIComponent(JSON.stringify(data)))),
     decrypt: async (enc) => JSON.parse(decodeURIComponent(escape(atob(enc)))),
   });
-  await adapter.register(mock());
+  await adapter.setup();
 
   const items: TestData[] = [
     { id: 'e1', name: 'encrypted 🎉', value: 1 },
     { id: 'e2', name: '日本語', value: 2 },
     { id: 'e3', name: 'special\nchars', value: 3 },
   ];
-  await adapter.save(items, { added: items, modified: [], removed: [] });
+  await adapter.insert(items);
 
   // Raw file should be encrypted (base64, not plain JSON)
   const raw = readFile('enc-edge.json');
   expect(() => JSON.parse(raw)).toThrow(); // not valid JSON
 
-  // Load should decrypt correctly
-  const result = await adapter.load();
-  expect(result.items).toEqual(items);
+  // Read should decrypt correctly
+  expect(await adapter.readAll()).toEqual(items);
 });
 
 test('Allow plaintext fallback when decrypt fails', async () => {
@@ -439,8 +421,7 @@ test('Allow plaintext fallback when decrypt fails', async () => {
     security: { allowPlaintextFallback: true },
   });
 
-  const result = await adapter.load();
-  expect(result.items).toEqual(plain_items);
+  expect(await adapter.readAll()).toEqual(plain_items);
 });
 
 test('Custom dataValidator rejects invalid shapes', async () => {
@@ -464,61 +445,14 @@ test('Custom dataValidator rejects invalid shapes', async () => {
     security: { validateDecryptedData: true, dataValidator: validator },
   });
 
-  await expect(adapter.load()).rejects.toThrow('Data failed validation');
+  await expect(adapter.readAll()).rejects.toThrow('Data failed validation');
 });
 
 // ═══════════════════════════════════════════
-// Unregister & callback lifecycle
+// Write-without-setup & lifecycle order
 // ═══════════════════════════════════════════
 
-test('Unregister then save does not call callback', async () => {
-  let call_count = 0;
-  const adapter = createAdapter<TestData>('unreg-callback.json');
-  await adapter.register(() => { call_count++; });
-  await adapter.unregister?.();
-
-  const data: TestData[] = [{ id: '1', name: 'after', value: 1 }];
-  await adapter.save(data, { added: data, modified: [], removed: [] });
-
-  expect(call_count).toBe(0);
-});
-
-test('Register with data already on disk fires callback', async () => {
-  const existing: TestData[] = [{ id: 'pre', name: 'existing', value: 42 }];
-  mock_file_system.set(
-    `${BaseDirectory.AppLocalData}/pre-existing.json`,
-    new TextEncoder().encode(JSON.stringify(existing))
-  );
-
-  let callback_data: any = null;
-  const adapter = createAdapter<TestData>('pre-existing.json');
-  await adapter.register((data) => { callback_data = data; });
-
-  expect(callback_data).toEqual({ items: existing });
-});
-
-test('Multiple saves only call callback for registered adapter', async () => {
-  let a_calls = 0, b_calls = 0;
-
-  const a = createAdapter<TestData>('a.json');
-  const b = createAdapter<TestData>('b.json');
-
-  await a.register(() => { a_calls++; });
-  await b.register(() => { b_calls++; });
-
-  const data: TestData[] = [{ id: '1', name: 'test', value: 1 }];
-  await a.save(data, { added: data, modified: [], removed: [] });
-  await b.save(data, { added: data, modified: [], removed: [] });
-
-  expect(a_calls).toBe(1);
-  expect(b_calls).toBe(1);
-});
-
-// ═══════════════════════════════════════════
-// Save-without-register & lifecycle order
-// ═══════════════════════════════════════════
-
-test('Save without register works (relies on load finding the file)', async () => {
+test('Insert without setup works (finds the existing file)', async () => {
   // Pre-populate the file
   const existing: TestData[] = [{ id: 'x', name: 'old', value: 1 }];
   mock_file_system.set(
@@ -527,83 +461,23 @@ test('Save without register works (relies on load finding the file)', async () =
   );
 
   const adapter = createAdapter<TestData>('no-reg.json');
-  const new_item: TestData[] = [
+  await adapter.insert([{ id: 'y', name: 'added', value: 2 }]);
+  await adapter.replace([{ id: 'x', name: 'updated', value: 1 }]);
+
+  expect(await adapter.readAll()).toEqual([
     { id: 'x', name: 'updated', value: 1 },
     { id: 'y', name: 'added', value: 2 },
-  ];
-  await adapter.save(new_item, { added: [{ id: 'y', name: 'added', value: 2 }], modified: [{ id: 'x', name: 'updated', value: 1 }], removed: [] });
-
-  const result = await adapter.load();
-  expect(result.items).toEqual(new_item);
+  ]);
 });
 
-test('Save without register on non-existent file creates data', async () => {
+test('Insert without setup on non-existent file creates data', async () => {
   const adapter = createAdapter<TestData>('orphan.json');
   const data: TestData[] = [{ id: 'o', name: 'orphan', value: 1 }];
 
-  // load() will return empty since file doesn't exist
-  // then changes.added adds the item → integrity check passes → save works
-  await adapter.save(data, { added: data, modified: [], removed: [] });
+  // Guard read returns empty since the file doesn't exist, then upsert adds it.
+  await adapter.insert(data);
 
-  const result = await adapter.load();
-  expect(result.items).toEqual(data);
-});
-
-// ═══════════════════════════════════════════
-// Incremental update integrity checks
-// ═══════════════════════════════════════════
-
-test('Fallback to full save when changes result in wrong item count', async () => {
-  const adapter = createAdapter<TestData>('count-mismatch.json');
-  await adapter.register(mock());
-
-  const initial: TestData[] = [
-    { id: '1', name: 'a', value: 1 },
-    { id: '2', name: 'b', value: 2 },
-  ];
-  await adapter.save(initial, { added: initial, modified: [], removed: [] });
-
-  // Provide changes that would result in 3 items but items array says 2
-  const items: TestData[] = [
-    { id: '1', name: 'a', value: 1 },
-    { id: '3', name: 'c', value: 3 },
-  ];
-  // change says add item 3 and remove item 2 resulting in {1,3} = 2 items
-  // but if we claim to remove id '2' AND not add '3'... mismatch
-  await adapter.save(items, {
-    added: [{ id: '3', name: 'c', value: 3 }],
-    modified: [],
-    removed: [{ id: '2', name: 'b', value: 2 }],
-  });
-
-  const result = await adapter.load();
-  expect(result.items).toEqual(items);
-});
-
-test('Fallback to full save when changes produce wrong IDs', async () => {
-  const adapter = createAdapter<TestData>('id-mismatch.json');
-  await adapter.register(mock());
-
-  const initial: TestData[] = [
-    { id: '1', name: 'a', value: 1 },
-    { id: '2', name: 'b', value: 2 },
-  ];
-  await adapter.save(initial, { added: initial, modified: [], removed: [] });
-
-  // Changes would produce IDs {2, 3} but items say {1, 3}
-  const expected: TestData[] = [
-    { id: '1', name: 'a', value: 1 },
-    { id: '3', name: 'c', value: 3 },
-  ];
-  // These changes would produce {2, 3}, a mismatch, so it falls back
-  await adapter.save(expected, {
-    added: [{ id: '3', name: 'c', value: 3 }],
-    modified: [],
-    removed: [{ id: '1', name: 'a', value: 1 }],
-  });
-
-  const result = await adapter.load();
-  expect(result.items).toEqual(expected);
+  expect(await adapter.readAll()).toEqual(data);
 });
 
 // ═══════════════════════════════════════════
@@ -614,17 +488,17 @@ test('Adapters with different filenames are fully isolated', async () => {
   const a = createAdapter<TestData>('alpha.json');
   const b = createAdapter<TestData>('beta.json');
 
-  await a.register(mock());
-  await b.register(mock());
+  await a.setup();
+  await b.setup();
 
   const data_a: TestData[] = [{ id: 'a', name: 'alpha', value: 1 }];
   const data_b: TestData[] = [{ id: 'b', name: 'beta', value: 2 }];
 
-  await a.save(data_a, { added: data_a, modified: [], removed: [] });
-  await b.save(data_b, { added: data_b, modified: [], removed: [] });
+  await a.insert(data_a);
+  await b.insert(data_b);
 
-  expect((await a.load()).items).toEqual(data_a);
-  expect((await b.load()).items).toEqual(data_b);
+  expect(await a.readAll()).toEqual(data_a);
+  expect(await b.readAll()).toEqual(data_b);
 
   // Verify files exist separately in mock filesystem
   expect(fileExists('alpha.json')).toBe(true);
@@ -633,72 +507,57 @@ test('Adapters with different filenames are fully isolated', async () => {
 });
 
 // ═══════════════════════════════════════════
-// Stress: rapid sequential saves
+// Stress: rapid sequential writes
 // ═══════════════════════════════════════════
 
-test('Rapid sequential saves maintain data integrity', async () => {
+test('Rapid sequential inserts maintain data integrity', async () => {
   const adapter = createAdapter<TestData>('rapid.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   for (let i = 0; i < 50; i++) {
-    const data: TestData[] = [{ id: `${i}`, name: `iter-${i}`, value: i }];
-    await adapter.save(data, { added: data, modified: [], removed: [] });
+    await adapter.insert([{ id: `${i}`, name: `iter-${i}`, value: i }]);
   }
 
-  const result = await adapter.load();
-  expect(result.items!.length).toBe(1);
-  expect(result.items![0].name).toBe('iter-49'); // last save wins
+  const result = await adapter.readAll();
+  expect(result.length).toBe(50);
+  expect(result[49].name).toBe('iter-49');
 });
 
-// ═══════════════════════════════════════════
-// Empty changes handling
-// ═══════════════════════════════════════════
+test('Rapid sequential replaces of one id: last write wins', async () => {
+  const adapter = createAdapter<TestData>('rapid-replace.json');
+  await adapter.setup();
 
-test('Save with undefined changes array works', async () => {
-  const adapter = createAdapter<TestData>('undef-changes.json');
-  await adapter.register(mock());
+  await adapter.insert([{ id: 'one', name: 'iter-0', value: 0 }]);
+  for (let i = 1; i < 50; i++) {
+    await adapter.replace([{ id: 'one', name: `iter-${i}`, value: i }]);
+  }
 
-  const data: TestData[] = [{ id: '1', name: 'test', value: 1 }];
-  // @ts-expect-error testing edge case
-  await adapter.save(data, { added: undefined, modified: undefined, removed: undefined });
-
-  const result = await adapter.load();
-  expect(result.items).toEqual(data);
-});
-
-test('Save with null changes array works', async () => {
-  const adapter = createAdapter<TestData>('null-changes.json');
-  await adapter.register(mock());
-
-  const data: TestData[] = [{ id: '1', name: 'test', value: 1 }];
-  // @ts-expect-error testing edge case
-  await adapter.save(data, { added: null, modified: null, removed: null });
-
-  const result = await adapter.load();
-  expect(result.items).toEqual(data);
+  const result = await adapter.readAll();
+  expect(result.length).toBe(1);
+  expect(result[0].name).toBe('iter-49');
 });
 
 // ═══════════════════════════════════════════
 // File overwrite behavior
 // ═══════════════════════════════════════════
 
-test('Saving replaces file completely, not appends', async () => {
+test('removeAll then insert replaces file completely, not appends', async () => {
   const adapter = createAdapter<TestData>('overwrite.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
-  // First save with 3 items
+  // First insert with 3 items
   const first: TestData[] = [
     { id: '1', name: 'a', value: 1 },
     { id: '2', name: 'b', value: 2 },
     { id: '3', name: 'c', value: 3 },
   ];
-  await adapter.save(first, { added: first, modified: [], removed: [] });
+  await adapter.insert(first);
 
-  // Second save with 1 completely different item
-  const second: TestData[] = [{ id: 'x', name: 'different', value: 99 }];
-  await adapter.save(second, { added: second, modified: [], removed: first });
+  // Clear and insert 1 completely different item
+  await adapter.removeAll();
+  await adapter.insert([{ id: 'x', name: 'different', value: 99 }]);
 
-  const result = await adapter.load();
-  expect(result.items!.length).toBe(1);
-  expect(result.items![0].id).toBe('x');
+  const result = await adapter.readAll();
+  expect(result.length).toBe(1);
+  expect(result[0].id).toBe('x');
 });

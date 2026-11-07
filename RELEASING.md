@@ -1,12 +1,12 @@
 # Releasing
 
-## Main line (3.x)
+## Main line (4.x)
 
 Push to `main` with a version bump in `package.json` (or merge the release PR). The publish workflow runs tests, typecheck, and the size budget, then publishes to npm with the `latest` tag and creates the GitHub release.
 
-## Maintenance lines (2.x)
+## Maintenance lines (3.x, 2.x)
 
-Each supported line has a branch: `maintenance/2.4.x`, `maintenance/2.3.x`, `maintenance/2.2.x`, `maintenance/2.1.x`. Never merge these into `main`; they are parallel release lines, and merging one would regress `main` to old code.
+Each supported line has a branch: `maintenance/3.1.x`, `maintenance/2.4.x`, `maintenance/2.3.x`, `maintenance/2.2.x`, `maintenance/2.1.x`. Never merge these into `main`; they are parallel release lines, and merging one would regress `main` to old code. The 3.x line is for apps still on `@signaldb/core` 1.x; it publishes under the `lts-3.1` tag.
 
 To ship a patch (example: 2.3.2):
 
