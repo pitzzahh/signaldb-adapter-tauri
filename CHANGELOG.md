@@ -1,5 +1,30 @@
 # Changelog
 
+## [4.0.0]: SignalDB core 2.x
+
+### Breaking
+- **Requires `@signaldb/core` 2.x and Node >=22** (`package.json`). On core 1.x, stay on the 3.x line (`lts-3.1` tag), which keeps getting security fixes. Node 18/20 are EOL; the adapter/targets only use Web APIs stable since Node 18, so the bump is build-time only.
+- **`adapter()` returns a `StorageAdapter`** (`src/index.ts`). The v1 `register`/`load`/`save` surface is gone; the adapter now implements `setup`/`teardown`/`readAll`/`readIds`/`insert`/`replace`/`remove`/`removeAll` plus index methods. Construct collections with `new Collection(name, new DefaultDataAdapter({ storage: () => adapter('f.json') }))`.
+- **Writes are per-operation, not full-state** (`src/index.ts`). `insert`/`replace` upsert by id, `remove` deletes by id. The save-coalescing from 3.1.0 is gone: skipping a queued write was safe for full-state saves and would lose data for incremental ops. The serialize queue stays, so concurrent writes still cannot interleave.
+- **Removed `security.propagateCallbackErrors`** (`src/types.ts`). Storage adapters have no change callbacks, so the option has nothing to do. Passing it is now a type error.
+- **Error strings renamed** (`src/index.ts`). `Refusing to save to prevent data loss` is now `refusing to write to prevent data loss`; `Failed to save <file>` is now `Failed to write <file>`, and encrypt failures surface as `Failed to encrypt data for <file>` instead of being wrapped.
+
+### Added
+- **`readIds` and index methods** (`src/index.ts`). Indexes are built on demand from the collection file, so there are no sidecar index files. Reading or dropping an index that was never created throws, which makes callers fall back to a full scan instead of answering wrong.
+- **No-op writes skip the rewrite** (`src/index.ts`). Empty inputs, removing ids that are not there, and `removeAll` on an empty store return without touching the file. This also skips a PBKDF2 derivation per call on encrypted stores.
+- **Same-tick writes batch under one rewrite** (`src/index.ts`). Updates submitted in the same tick, the way `insertMany` fans out, share one guard read and one file rewrite, applied in submission order. A 500-item `insertMany` costs 4 fs calls instead of 2000, and one PBKDF2 derivation instead of 500 on encrypted stores. Sequential awaits are unaffected, and every op in a batch shares its fate: all resolve or all reject.
+- **Missing-file detection no longer trusts error strings alone** (`src/index.ts`). When a read fails with an unrecognized message, the adapter asks `exists()` before deciding the file is missing. Known "not found" wordings take the fast path with no extra call.
+
+### Changed
+- **No data migration needed.** The on-disk format is byte-identical to 3.x. The official SignalDB adapters all broke their v1 storage layout; this one reads 3.x files as-is.
+- **Awaited durability.** With core 2.x, `await collection.insert(...)` resolves after the file lands. The 3.x background-save window is gone.
+- **Fail-closed writes kept** (`src/index.ts`). Every mutating op still refuses when the stored file is unreadable or corrupt, and corrupt plaintext still reads as empty with a `[DATA]` warning.
+- **Three floating `rejects` assertions now `await`** (`test/hardening.test.ts`), so they actually gate their tests.
+- Bundle sizes: `dist/index.js` 6.26 KB, `dist/encryption.js` 2.47 KB (minified).
+
+### Tests
+- Suite ported to the v2 API (116 tests): per-op insert/replace/remove coverage, concurrent-write serialization (nothing lost, exact order), same-tick batching (one rewrite per burst, shared fate on failure), real-`Collection` round-trips for both the new constructor and the legacy `persistence` form, `onError`/`ready()` failure paths, and index lifecycle tests.
+
 ## [3.1.0]: Fail-closed saves and leaner bundle
 
 ### Fail-closed behavior changes

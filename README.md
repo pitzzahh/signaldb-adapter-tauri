@@ -4,9 +4,9 @@
 [![Test](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml/badge.svg)](https://github.com/pitzzahh/signaldb-adapter-tauri/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Filesystem persistence for [SignalDB](https://github.com/maxnowack/signaldb) in Tauri apps. One line per collection, with optional AES-256-GCM encryption.
+Filesystem persistence for [SignalDB](https://github.com/maxnowack/signaldb) in Tauri apps. One file per collection, with optional AES-256-GCM encryption.
 
-5.89 KB minified (adapter only, 2.54 KB for encryption). Zero runtime dependencies.
+6.26 KB minified (adapter only, 2.47 KB for encryption). Zero runtime dependencies.
 
 ## Install
 
@@ -20,25 +20,44 @@ bun add @pitzzahh/signaldb-adapter-tauri
 
 Peer dependencies (already in your Tauri + SignalDB project):
 
-- `@signaldb/core` 1.x
+- `@signaldb/core` 2.x
 - `@tauri-apps/api` 2.x
 - `@tauri-apps/plugin-fs` 2.x
 
 ## Quick start
 
 ```typescript
-import { Collection } from '@signaldb/core';
+import { Collection, DefaultDataAdapter } from '@signaldb/core';
 import { adapter } from '@pitzzahh/signaldb-adapter-tauri';
 
-const users = new Collection({
-  name: 'users',
-  persistence: adapter('users.json')
+const dataAdapter = new DefaultDataAdapter({
+  storage: () => adapter('users.json')
 });
 
-users.insert({ name: 'John Doe', email: 'john@example.com' });
+const users = new Collection('users', dataAdapter);
+await users.ready();
+
+await users.insert({ name: 'John Doe', email: 'john@example.com' });
 ```
 
 That stores plaintext. For anything beyond throwaway local state, add encryption from the next section.
+
+Writes are awaited through to disk: `insert` resolves after the file lands, so there is no background-save window where a quit loses data.
+
+## Migrating from 3.x
+
+SignalDB 2.x made collection writes async and replaced persistence adapters with storage adapters. The steps:
+
+1. Upgrade `@signaldb/core` to 2.x.
+2. Construct collections with `new Collection(name, dataAdapter)` as above. The old `new Collection({ name, persistence })` form still works but is deprecated.
+3. `await` every write. `insert` now resolves to the new id, `updateOne`/`removeOne` to a count.
+4. Drop `security.propagateCallbackErrors` if you set it. Storage adapters have no change callbacks, so the option is gone.
+
+Your data files need no migration. The on-disk format is byte-identical to 3.x: point the 4.x adapter at the same filename and it reads what 3.x wrote.
+
+Two error strings changed: `Refusing to save to prevent data loss` is now `refusing to write to prevent data loss`, and `Failed to save <file>` is now `Failed to write <file>` (or the more specific `Failed to encrypt data for <file>`). Update any log filters that match on them.
+
+Still on `@signaldb/core` 1.x? Stay on the 3.x line of this package (`npm install @pitzzahh/signaldb-adapter-tauri@lts-3.1`). It gets security fixes; see SECURITY.md.
 
 ## Tauri setup: grant filesystem access
 
@@ -157,16 +176,18 @@ const secure = adapter('secure-data.json', {
 });
 ```
 
-Why this shape: the vault password is the only secret the user must remember, and the actual database passphrase is high-entropy randomness no one needs to type. Hardcoding `vaultPassword` instead of prompting would just move the embedded-secret problem one layer down — don't do that. If a vault is overkill for your app, the simpler secure option is to prompt for the database passphrase on every launch and skip Stronghold entirely.
+Why this shape: the vault password is the only secret the user must remember, and the actual database passphrase is high-entropy randomness no one needs to type. Hardcoding `vaultPassword` instead of prompting would just move the embedded-secret problem one layer down. Don't do that. If a vault is overkill for your app, the simpler secure option is to prompt for the database passphrase on every launch and skip Stronghold entirely.
 
 ## Behavior worth knowing
 
-- **Atomic writes.** Each save goes to a temp file, then renames over the original. A crash mid-write leaves the previous version intact.
-- **Serialized saves.** Concurrent `save()` calls run in order through a queue, so they cannot interleave read-modify-write and drop updates. A burst of concurrent saves coalesces: skipped intermediates resolve normally and the newest call persists the latest state.
-- **Missing files start empty.** A corrupt plaintext file loads as empty with a loud console warning, but saves to it are refused until the file is fixed or removed. Encrypted files fail loudly instead of guessing.
+- **Atomic writes.** Each write goes to a temp file, then renames over the original. A crash mid-write leaves the previous version intact.
+- **Serialized writes.** Concurrent writes run in order through a queue, so they cannot interleave read-modify-write and drop updates. Writes submitted in the same tick (an `insertMany` burst) share one file rewrite, applied in order. Empty writes (`insert([])`, removing ids that are not there) skip the rewrite entirely.
+- **One process per file.** The queue lives in memory, so two processes writing the same file can interleave and lose updates. If your app can launch twice, enforce single-instance (Tauri has a plugin for that).
+- **Missing files start empty.** A corrupt plaintext file reads as empty with a loud console warning, but writes to it are refused until the file is fixed or removed. Encrypted files fail loudly instead of guessing.
 - **Flat filenames only.** No paths, no `..`, no reserved device names (`CON`, `NUL`, ...). One file per collection, in one base directory.
-- **Backups are off by default.** Frequent sync writes would pile up backup files, so set `security.createBackups: true` only if you want timestamped copies before each save.
+- **Backups are off by default.** Frequent writes would pile up backup files, so set `security.createBackups: true` only if you want timestamped copies before each write.
 - **Data validation is on by default.** Decrypted data must be an array unless you supply a custom `dataValidator` or disable the check.
+- **Indexes need no files.** `createIndex`/`readIndex` are answered from the collection file on demand, so there are no sidecar index files to back up or lose.
 
 ## API
 
@@ -192,11 +213,9 @@ export interface SecurityOptions {
   allowPlaintextFallback: boolean;
   /** Validate decrypted data structure (default true) */
   validateDecryptedData: boolean;
-  /** Throw change-callback errors instead of logging them */
-  propagateCallbackErrors: boolean;
   /** Custom data validator function */
   dataValidator: <T>(data: unknown) => data is T[];
-  /** Write timestamped backups before each save (default false) */
+  /** Write timestamped backups before each write (default false) */
   createBackups: boolean;
   /** How many backups to keep (default 5) */
   maxBackups: number;
@@ -238,7 +257,7 @@ What the adapter guarantees:
 
 - Path traversal is rejected at construction time.
 - AES-GCM authentication detects tampering. Modified ciphertext never loads.
-- `save()` refuses to overwrite when it cannot read the current file, instead of destroying data.
+- Writes refuse to overwrite when they cannot read the current file, instead of destroying data.
 - Passphrases and keys are held as non-extractable `CryptoKey`s and never written to disk by the adapter.
 
 What stays your job:

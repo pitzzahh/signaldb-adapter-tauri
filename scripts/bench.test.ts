@@ -1,4 +1,4 @@
-import { Collection, type PersistenceAdapter } from '@signaldb/core';
+import { Collection, DefaultDataAdapter, type StorageAdapter } from '@signaldb/core';
 import { test, expect, beforeEach, afterEach, describe, mock } from 'bun:test';
 import { BaseDirectory } from '@tauri-apps/plugin-fs';
 
@@ -187,7 +187,7 @@ interface NestedTestData {
 }
 
 class PerformanceTester {
-  private adapter: PersistenceAdapter<TestData, unknown>;
+  private adapter: StorageAdapter<TestData, string>;
   private collection: Collection<TestData>;
   private testFileName: string;
 
@@ -198,17 +198,12 @@ class PerformanceTester {
       decrypt: encrypted ? this.decrypt : undefined
     });
 
-    this.collection = new Collection<TestData>({ persistence: this.adapter });
-
-    // SignalDB persists in the background and reports save failures through
-    // 'persistence.error'. Without a listener, that emit throws and can fail
-    // a throughput measurement that already recorded its numbers.
-    // Correctness is covered in test/, so swallow it here.
-    this.collection.on('persistence.error', () => {});
+    const dataAdapter = new DefaultDataAdapter({ storage: () => this.adapter });
+    this.collection = new Collection<TestData>(testFileName, dataAdapter);
   }
 
   async initialize(): Promise<void> {
-    await this.adapter.register(() => { });
+    await this.adapter.setup();
   }
 
   async cleanup(): Promise<void> {
@@ -230,6 +225,19 @@ class PerformanceTester {
     for (const item of items) {
       await this.collection.insert(item);
     }
+
+    const endTime = performance.now();
+    return endTime - startTime;
+  }
+
+  async testBurstInsertPerformance(itemCount: number): Promise<number> {
+    const items = this.generateTestData(itemCount);
+
+    const startTime = performance.now();
+
+    // insertMany fans out over Promise.all, so the adapter batches
+    // the whole burst under a single file rewrite.
+    await this.collection.insertMany(items);
 
     const endTime = performance.now();
     return endTime - startTime;
@@ -260,7 +268,7 @@ class PerformanceTester {
 
     // Update all items
     for (let i = 0; i < itemCount; i++) {
-      this.collection.updateOne(
+      await this.collection.updateOne(
         { id: `item-${i}` },
         { $set: { name: `Updated Item ${i}`, timestamp: Date.now() } }
       );
@@ -281,11 +289,15 @@ class PerformanceTester {
 
     // Delete all items
     for (let i = 0; i < itemCount; i++) {
-      this.collection.removeOne({ id: `item-${i}` });
+      await this.collection.removeOne({ id: `item-${i}` });
     }
 
     const endTime = performance.now();
     return endTime - startTime;
+  }
+
+  count(): number {
+    return this.collection.find({}).fetch().length;
   }
 
   async testLoadPerformance(): Promise<{ loadTime: number; itemCount: number }> {
@@ -356,7 +368,7 @@ class PerformanceTester {
 }
 
 class NestedPerformanceTester {
-  private adapter: PersistenceAdapter<NestedTestData, unknown>;
+  private adapter: StorageAdapter<NestedTestData, string>;
   private collection: Collection<NestedTestData>;
   private testFileName: string;
 
@@ -367,14 +379,12 @@ class NestedPerformanceTester {
       decrypt: encrypted ? this.decrypt : undefined
     });
 
-    this.collection = new Collection<NestedTestData>({ persistence: this.adapter });
-
-    // Same background-save guard as PerformanceTester above.
-    this.collection.on('persistence.error', () => {});
+    const dataAdapter = new DefaultDataAdapter({ storage: () => this.adapter });
+    this.collection = new Collection<NestedTestData>(testFileName, dataAdapter);
   }
 
   async initialize(): Promise<void> {
-    await this.adapter.register(() => { });
+    await this.adapter.setup();
   }
 
   async cleanup(): Promise<void> {
@@ -432,7 +442,7 @@ class NestedPerformanceTester {
 
     // Update nested fields
     for (let i = 0; i < Math.min(itemCount, 100); i++) {
-      this.collection.updateOne(
+      await this.collection.updateOne(
         { id: `nested-item-${i}` },
         {
           $set: {
@@ -530,8 +540,7 @@ describe('Performance Tests', () => {
       const message = args.join(' ');
       // Only suppress specific expected warnings
       if (message.includes('[SECURITY]') ||
-        message.includes('Failed to create backup') ||
-        message.includes('Incremental update mismatch')) {
+        message.includes('Failed to create backup')) {
         return; // Suppress these expected warnings
       }
       originalConsoleWarn(...args); // Show other warnings
@@ -573,6 +582,21 @@ describe('Performance Tests', () => {
     ]);
 
     expect(isValidTiming(insertTime)).toBe(true);
+  });
+
+  test('Burst insert performance - medium dataset', async () => {
+    const itemCount = DATASET_SIZES.MEDIUM;
+    const burstTime = await tester.testBurstInsertPerformance(itemCount);
+
+    formatPerformanceTable(`Burst Insert Performance (${itemCount} items, one batch)`, [
+      { label: 'Items processed', value: itemCount },
+      { label: 'Total time', value: burstTime, unit: 'ms' },
+      { label: 'Average per insert', value: burstTime / itemCount, unit: 'ms' },
+      { label: 'Throughput', value: itemCount / (burstTime / 1000), unit: 'items/sec' }
+    ]);
+
+    expect(isValidTiming(burstTime)).toBe(true);
+    expect(tester.count()).toBe(itemCount);
   });
 
   test('Load performance after inserting data', async () => {
@@ -666,28 +690,28 @@ describe('Performance Tests', () => {
     expect(isValidTiming(unencryptedTime)).toBe(true);
   });
 
-  test('Real AES-GCM save cost (per-save PBKDF2 derivation)', async () => {
+  test('Real AES-GCM write cost (per-write PBKDF2 derivation)', async () => {
     const { createEncryption } = await import('../src/encryption');
     // NOTE: 1k iterations keep the bench fast; production uses >=100k.
-    // This measures throughput shape (key derivation runs per save),
+    // This measures throughput shape (key derivation runs per write),
     // not absolute production crypto cost.
     const { encrypt, decrypt } = createEncryption('bench-passphrase-real-crypto', { iterations: 1000 });
     const adapter = createAdapter<TestData>('bench-real-crypto.json', { encrypt, decrypt });
-    await adapter.register(() => {});
+    await adapter.setup();
 
     const itemCount = 20;
     const startTime = performance.now();
     for (let i = 0; i < itemCount; i++) {
       const item: TestData = { id: `item-${i}`, name: `Item ${i}`, data: 'x'.repeat(100) };
-      await adapter.save([item], { added: [item], modified: [], removed: [] });
+      await adapter.insert([item]);
     }
     const elapsed = performance.now() - startTime;
 
-    formatPerformanceTable('Real AES-GCM Save Cost (20 saves)', [
-      { label: 'Saves completed', value: itemCount },
+    formatPerformanceTable('Real AES-GCM Write Cost (20 writes)', [
+      { label: 'Writes completed', value: itemCount },
       { label: 'Total time', value: elapsed, unit: 'ms' },
-      { label: 'Average per save', value: elapsed / itemCount, unit: 'ms' },
-      { label: 'Throughput', value: itemCount / (elapsed / 1000), unit: 'saves/sec' }
+      { label: 'Average per write', value: elapsed / itemCount, unit: 'ms' },
+      { label: 'Throughput', value: itemCount / (elapsed / 1000), unit: 'writes/sec' }
     ]);
 
     expect(isValidTiming(elapsed)).toBe(true);
@@ -698,9 +722,7 @@ describe('Performance Tests', () => {
     const results: Array<{ size: number; time: number; avgTime: number; throughput: number }> = [];
 
     for (const size of sizes) {
-      // No clear() here on purpose. Each size uses its own filename, and
-      // wiping the shared mock FS would delete temp files of saves still
-      // draining in the background (SignalDB persists asynchronously).
+      // Each size uses its own filename, so no clear() is needed.
       const t = new PerformanceTester(`scale-${size}.json`);
       await t.initialize();
       const time = await t.testInsertPerformance(size);
@@ -717,8 +739,7 @@ describe('Performance Tests', () => {
     const results: Array<{ size: number; time: number; avgTime: number; throughput: number }> = [];
 
     for (const size of sizes) {
-      // No clear() here on purpose. Same reason as the simple scaling test
-      // above: filenames are unique per size, background saves still drain.
+      // Each size uses its own filename, so no clear() is needed.
       const t = new NestedPerformanceTester(`nested-scale-${size}.json`);
       await t.initialize();
       const time = await t.testNestedInsertPerformance(size);
