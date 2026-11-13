@@ -119,11 +119,10 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
 
   // No index files on disk; readIndex builds the answer from file data.
   const createdIndexes = new Set<string>();
-  // The last file contents this instance read or wrote, with their decoded
-  // items and any readIndex results built from them. Reads still hit the
-  // disk, but identical bytes skip decrypt/parse/validate, so an external
-  // edit or a second instance is always seen. Never hand items out
-  // uncloned: callers mutating them would corrupt the next write.
+  // Last file contents this instance read or wrote, decoded, plus any
+  // readIndex results built from them. Reads still hit the disk; only
+  // identical bytes skip decrypt/parse/validate. Items leave as clones so
+  // a caller editing them can't change the next write.
   type Snapshot = {
     text: string;
     items: T[];
@@ -137,11 +136,15 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
   // Serializes read-modify-write so concurrent writes cannot lose updates.
   let writeQueue: Promise<void> = Promise.resolve();
 
-  const readItemsInternal = async (): Promise<Snapshot> => {
+  // onRaw receives the file bytes as read, for the write path's backup.
+  const readItemsInternal = async (
+    onRaw?: (raw: Uint8Array) => void
+  ): Promise<Snapshot> => {
     try {
       let contents: Uint8Array;
       try {
         contents = await readFile(filename, { baseDir: base_dir });
+        onRaw?.(contents);
       } catch (error) {
         // Only a missing file reads as empty; I/O errors propagate. The
         // message match covers known backends; exists() disambiguates the
@@ -228,12 +231,12 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
     }
   };
 
-  const writeItems = async (items: T[]): Promise<void> => {
-    if (security.createBackups) {
+  // previous is the file as the guard read saw it, or null if it was missing.
+  const writeItems = async (items: T[], previous: Uint8Array | null): Promise<void> => {
+    if (security.createBackups && previous) {
       const backup_filename = createBackupFilename(filename);
       try {
-        const current_content = await readFile(filename, { baseDir: base_dir });
-        await writeFile(backup_filename, current_content, { baseDir: base_dir });
+        await writeFile(backup_filename, previous, { baseDir: base_dir });
         const max = security.maxBackups ?? 5;
         if (knownBackups === null) {
           try {
@@ -353,8 +356,9 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         const run = async (): Promise<void> => {
           const fail = (error: unknown) => batch.forEach((op) => op.reject(error));
           let current: T[];
+          let previous: Uint8Array | null = null;
           try {
-            current = (await readItemsInternal()).items;
+            current = (await readItemsInternal((raw) => { previous = raw; })).items;
           } catch (error) {
             fail(new Error(
               `Failed to read ${filename}: refusing to write to prevent data loss.`,
@@ -378,7 +382,7 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
             return;
           }
           try {
-            await writeItems([...working.values()]);
+            await writeItems([...working.values()], previous);
           } catch (error) {
             fail(error);
             return;

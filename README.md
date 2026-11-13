@@ -6,7 +6,7 @@
 
 Filesystem persistence for [SignalDB](https://github.com/maxnowack/signaldb) in Tauri apps. One file per collection, with optional AES-256-GCM encryption.
 
-6.26 KB minified (adapter only, 2.47 KB for encryption). Zero runtime dependencies.
+6.38 KB minified (adapter only, 2.47 KB for encryption). Zero runtime dependencies.
 
 ## Install
 

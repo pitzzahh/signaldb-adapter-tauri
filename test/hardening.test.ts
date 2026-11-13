@@ -704,3 +704,38 @@ test('Uncloneable items still write, and the next read decodes the file', async 
   expect(await adapter.readAll()).toEqual([{ id: '1' }]);
   expect(codec.decrypts).toBe(1);
 });
+
+// ─── Backups reuse the guard read ───
+
+test('Backups hold the exact pre-write bytes without an extra file read', async () => {
+  const adapter = createAdapter<TestData>('backup-bytes.json', {
+    security: { createBackups: true },
+  });
+  const path = `${BaseDirectory.AppLocalData}/backup-bytes.json`;
+  // A BOM survives JSON.parse but not a decode/encode round trip.
+  const original = new TextEncoder().encode('[{"id":"1","name":"a","value":1}]');
+  const bom_bytes = new Uint8Array([0xef, 0xbb, 0xbf, ...original]);
+  mock_file_system.set(path, bom_bytes);
+
+  mock_read_file.mockClear();
+  await adapter.insert([{ id: '2', name: 'b', value: 2 }]);
+
+  const backups = [...mock_file_system.keys()].filter((key) => key.includes('backup-bytes.json.backup.'));
+  expect(backups).toHaveLength(1);
+  expect(mock_file_system.get(backups[0])).toEqual(bom_bytes);
+  // Guard read plus temp-file verification; the backup costs no read.
+  const reads = mock_read_file.mock.calls.map(([name]) => name as string);
+  expect(reads.filter((name) => name === 'backup-bytes.json')).toHaveLength(1);
+});
+
+test('A missing file is not backed up and does not warn', async () => {
+  const adapter = createAdapter<TestData>('backup-missing.json', {
+    security: { createBackups: true },
+  });
+  await adapter.insert([{ id: '1', name: 'a', value: 1 }]);
+
+  const backups = [...mock_file_system.keys()].filter((key) => key.includes('.backup.'));
+  expect(backups).toHaveLength(0);
+  expect(warnings.some((w) => w.includes('Failed to create backup'))).toBe(false);
+  expect(await adapter.readAll()).toEqual([{ id: '1', name: 'a', value: 1 }]);
+});

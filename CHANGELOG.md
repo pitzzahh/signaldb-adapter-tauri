@@ -14,6 +14,7 @@
 - **No-op writes skip the rewrite** (`src/index.ts`). Empty inputs, removing ids that are not there, and `removeAll` on an empty store return without touching the file. This also skips a PBKDF2 derivation per call on encrypted stores.
 - **Same-tick writes batch under one rewrite** (`src/index.ts`). Updates submitted in the same tick, the way `insertMany` fans out, share one guard read and one file rewrite, applied in submission order. A 500-item `insertMany` costs 4 fs calls instead of 2000, and one PBKDF2 derivation instead of 500 on encrypted stores. Sequential awaits are unaffected, and every op in a batch shares its fate: all resolve or all reject. A batch applies its ops to one id-keyed map, so k ops on n stored items cost O(n + k) instead of O(n * k).
 - **Decoded snapshot cache** (`src/index.ts`). The adapter remembers the last file contents it read or wrote together with the decoded items. Every read and every write's guard read still reads the file, but identical bytes skip decrypt, parse and validation, so a sequential `await insert(...)` on an encrypted store costs one PBKDF2 derivation instead of two (the real AES-GCM write bench: 37 ms → 17 ms for 20 writes). Different bytes, from an external edit or a second instance on the same file, are always decoded. `readAll`/`readIds` return clones, and written items are cloned into the cache, so mutating either side cannot leak into the next write. Items that `structuredClone` rejects (functions) just skip the cache.
+- **Backups reuse the guard read** (`src/index.ts`). The backup is written from the bytes the write already read, so it costs no extra read and matches the replaced file byte for byte. A missing file has nothing to back up, so the write skips the backup instead of warning.
 - **Missing-file detection no longer trusts error strings alone** (`src/index.ts`). When a read fails with an unrecognized message, the adapter asks `exists()` before deciding the file is missing. Known "not found" wordings take the fast path with no extra call.
 
 ### Fixed
@@ -25,7 +26,7 @@
 - **Awaited durability.** With core 2.x, `await collection.insert(...)` resolves after the file lands. The 3.x background-save window is gone.
 - **Fail-closed writes kept** (`src/index.ts`). Every mutating op still refuses when the stored file is unreadable or corrupt, and corrupt plaintext still reads as empty with a `[DATA]` warning.
 - **Three floating `rejects` assertions now `await`** (`test/hardening.test.ts`), so they actually gate their tests.
-- Bundle sizes: `dist/index.js` 6.26 KB, `dist/encryption.js` 2.47 KB (minified).
+- Bundle sizes: `dist/index.js` 6.38 KB, `dist/encryption.js` 2.47 KB (minified).
 
 ### Tests
 - Suite ported to the v2 API (116 tests): per-op insert/replace/remove coverage, concurrent-write serialization (nothing lost, exact order), same-tick batching (one rewrite per burst, shared fate on failure), real-`Collection` round-trips for both the new constructor and the legacy `persistence` form, `onError`/`ready()` failure paths, and index lifecycle tests.
