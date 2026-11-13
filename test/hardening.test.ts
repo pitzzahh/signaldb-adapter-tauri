@@ -147,6 +147,36 @@ test('Same-tick writes batch into one file rewrite', async () => {
   expect(temp_writes.length).toBe(1);
 });
 
+test('Mixed ops in one batch apply in order and keep item positions', async () => {
+  const adapter = createAdapter<TestData>('batched-mixed.json');
+  await adapter.setup();
+  await adapter.insert([
+    { id: 'a', name: 'first', value: 1 },
+    { id: 'b', name: 'second', value: 2 },
+    { id: 'c', name: 'third', value: 3 },
+  ]);
+
+  mock_write_file.mockClear();
+  await Promise.all([
+    adapter.replace([{ id: 'b', name: 'second-v2', value: 20 }]),
+    adapter.remove([{ id: 'a', name: 'first', value: 1 }]),
+    adapter.insert([{ id: 'd', name: 'fourth', value: 4 }]),
+    adapter.remove([{ id: 'd', name: 'fourth', value: 4 }]),
+    adapter.insert([{ id: 'e', name: 'fifth', value: 5 }]),
+    adapter.remove([{ id: 'missing', name: 'x', value: 0 }]),
+  ]);
+
+  expect(await adapter.readAll()).toEqual([
+    { id: 'b', name: 'second-v2', value: 20 },
+    { id: 'c', name: 'third', value: 3 },
+    { id: 'e', name: 'fifth', value: 5 },
+  ]);
+  const temp_writes = mock_write_file.mock.calls.filter(([name]) =>
+    (name as string).includes('.tmp.')
+  );
+  expect(temp_writes.length).toBe(1);
+});
+
 test('Sequential awaits stay in separate batches', async () => {
   const adapter = createAdapter<TestData>('unbatched.json');
   await adapter.setup();

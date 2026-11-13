@@ -310,13 +310,14 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
   // submission order. Sequential awaits always land in separate batches,
   // and every op in a batch shares its fate: all resolve or all reject.
   let openBatch: Array<{
-    update: (current: T[]) => T[] | null;
+    update: (items: Map<ID, T>) => boolean;
     resolve: () => void;
     reject: (error: unknown) => void;
   }> | null = null;
 
-  // update returns the new full state, or null to skip the rewrite.
-  const mutate = (update: (current: T[]) => T[] | null): Promise<void> => {
+  // update edits the batch's working map in place and returns whether it
+  // changed anything; a batch where nothing changed skips the rewrite.
+  const mutate = (update: (items: Map<ID, T>) => boolean): Promise<void> => {
     return new Promise<void>((resolve, reject) => {
       if (openBatch) {
         openBatch.push({ update, resolve, reject });
@@ -338,15 +339,12 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
             ));
             return;
           }
-          let next = current;
+          // One map per batch keeps k ops at O(n + k), not O(n * k).
+          const working = new Map(current.map((item) => [item.id, item]));
           let dirty = false;
           try {
             for (const op of batch) {
-              const updated = op.update(next);
-              if (updated !== null) {
-                next = updated;
-                dirty = true;
-              }
+              if (op.update(working)) dirty = true;
             }
           } catch (error) {
             fail(error);
@@ -357,7 +355,7 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
             return;
           }
           try {
-            await writeItems(next);
+            await writeItems([...working.values()]);
             indexCache.clear();
           } catch (error) {
             fail(error);
@@ -371,18 +369,10 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
     });
   };
 
-  const upsert = (current: T[], incoming: T[]): T[] => {
-    if (incoming.length === 1) {
-      const item = incoming[0];
-      const idx = current.findIndex((c) => c.id === item.id);
-      if (idx === -1) return [...current, item];
-      const next = [...current];
-      next[idx] = item;
-      return next;
-    }
-    const byId = new Map(current.map((item) => [item.id, item]));
-    for (const item of incoming) byId.set(item.id, item);
-    return [...byId.values()];
+  // Map.set keeps an existing id in place and appends a new one.
+  const upsert = (items: Map<ID, T>, incoming: T[]): boolean => {
+    for (const item of incoming) items.set(item.id, item);
+    return incoming.length > 0;
   };
 
   return createStorageAdapter<T, ID>({
@@ -435,18 +425,18 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
       indexCache.set(field, index);
       return index;
     },
-    insert: (items) => mutate((current) =>
-      items.length === 0 ? null : upsert(current, items)),
-    replace: (items) => mutate((current) =>
-      items.length === 0 ? null : upsert(current, items)),
+    insert: (items) => mutate((current) => upsert(current, items)),
+    replace: (items) => mutate((current) => upsert(current, items)),
     remove: (items) => mutate((current) => {
-      if (items.length === 0) return null;
-      const doomed = new Set(items.map((item) => item.id));
-      if (!current.some((item) => doomed.has(item.id))) return null;
-      return current.filter((item) => !doomed.has(item.id));
+      let changed = false;
+      for (const item of items) changed = current.delete(item.id) || changed;
+      return changed;
     }),
-    removeAll: () => mutate((current) =>
-      current.length === 0 ? null : []),
+    removeAll: () => mutate((current) => {
+      if (current.size === 0) return false;
+      current.clear();
+      return true;
+    }),
   });
 }
 

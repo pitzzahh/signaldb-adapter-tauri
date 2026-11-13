@@ -12,7 +12,7 @@
 ### Added
 - **`readIds` and index methods** (`src/index.ts`). Indexes are built on demand from the collection file, so there are no sidecar index files. Reading or dropping an index that was never created throws, which makes callers fall back to a full scan instead of answering wrong.
 - **No-op writes skip the rewrite** (`src/index.ts`). Empty inputs, removing ids that are not there, and `removeAll` on an empty store return without touching the file. This also skips a PBKDF2 derivation per call on encrypted stores.
-- **Same-tick writes batch under one rewrite** (`src/index.ts`). Updates submitted in the same tick, the way `insertMany` fans out, share one guard read and one file rewrite, applied in submission order. A 500-item `insertMany` costs 4 fs calls instead of 2000, and one PBKDF2 derivation instead of 500 on encrypted stores. Sequential awaits are unaffected, and every op in a batch shares its fate: all resolve or all reject.
+- **Same-tick writes batch under one rewrite** (`src/index.ts`). Updates submitted in the same tick, the way `insertMany` fans out, share one guard read and one file rewrite, applied in submission order. A 500-item `insertMany` costs 4 fs calls instead of 2000, and one PBKDF2 derivation instead of 500 on encrypted stores. Sequential awaits are unaffected, and every op in a batch shares its fate: all resolve or all reject. A batch applies its ops to one id-keyed map, so k ops on n stored items cost O(n + k) instead of O(n * k).
 - **Missing-file detection no longer trusts error strings alone** (`src/index.ts`). When a read fails with an unrecognized message, the adapter asks `exists()` before deciding the file is missing. Known "not found" wordings take the fast path with no extra call.
 
 ### Fixed
