@@ -130,10 +130,14 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
   };
   let snapshot: Snapshot | null = null;
   const emptySnapshot = (): Snapshot => ({ text: '', items: [], indexes: new Map() });
-  // Written items can only be cached as what a read would decode when the
-  // codec is plain JSON. Any other codec gets decoded on the next read.
+  // createEncryption's pair decodes to exactly the JSON round trip, so its
+  // writes are remembered as plaintext JSON and parsed only when the next
+  // read finds the same bytes: that read skips PBKDF2. Plain stores parse
+  // their file anyway, and other codecs may change data on the way
+  // through, so their writes are simply decoded on the next read.
   const jsonCodec = !options?.encrypt ||
     (isJsonCodec(options.encrypt) && isJsonCodec(options.decrypt));
+  let written: { text: string; json: string } | null = null;
   // Backup names known to this instance (newest first). Seeded once from
   // the directory so per-write pruning needs no readDir scan.
   let knownBackups: string[] | null = null;
@@ -164,6 +168,17 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
 
       const text_content = decoder.decode(contents);
       if (text_content.length === 0 || !/\S/.test(text_content)) return emptySnapshot();
+      if (written?.text === text_content) {
+        const { json } = written;
+        written = null;
+        try {
+          const items = JSON.parse(json);
+          validate(items, 'Data failed validation');
+          snapshot = { text: text_content, items, indexes: new Map() };
+        } catch {
+          // Fall through and decode the file, which reports the real error.
+        }
+      }
       if (snapshot?.text === text_content) return snapshot;
 
       let decrypted_data: T[];
@@ -237,6 +252,10 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
 
   // previous is the file as the guard read saw it, or null if it was missing.
   const writeItems = async (items: T[], previous: Uint8Array | null): Promise<void> => {
+    // The file is about to change; let the old decoded copy go before the
+    // new one is serialized, so peak memory stays near one copy.
+    snapshot = null;
+    written = null;
     if (security.createBackups && previous) {
       const backup_filename = createBackupFilename(filename);
       try {
@@ -311,17 +330,8 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         newPathBaseDir: base_dir
       });
 
-      // Cache what a read of this file would decode; invalid data is left
-      // for the next read to reject.
-      snapshot = null;
-      if (jsonCodec) {
-        try {
-          const saved: T[] = JSON.parse(options?.encrypt ? JSON.stringify(items) : data_to_save);
-          validate(saved, 'Written data failed validation');
-          snapshot = { text: data_to_save, items: saved, indexes: new Map() };
-        } catch {
-          // Leave snapshot null.
-        }
+      if (options?.encrypt && jsonCodec) {
+        written = { text: data_to_save, json: JSON.stringify(items) };
       }
 
     } catch (writeError) {
