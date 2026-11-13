@@ -15,6 +15,9 @@
 - **Same-tick writes batch under one rewrite** (`src/index.ts`). Updates submitted in the same tick, the way `insertMany` fans out, share one guard read and one file rewrite, applied in submission order. A 500-item `insertMany` costs 4 fs calls instead of 2000, and one PBKDF2 derivation instead of 500 on encrypted stores. Sequential awaits are unaffected, and every op in a batch shares its fate: all resolve or all reject.
 - **Missing-file detection no longer trusts error strings alone** (`src/index.ts`). When a read fails with an unrecognized message, the adapter asks `exists()` before deciding the file is missing. Known "not found" wordings take the fast path with no extra call.
 
+### Fixed
+- **`readIndex` keys null and missing values under `null`** (`src/index.ts`). Core's index lookups for `{ field: null }`, `{ field: { $exists: false } }` and `$ne` read that key; skipping it made those queries return nothing on an indexed field under `AsyncDataAdapter`, `AutoFetchDataAdapter` and `WorkerDataAdapterHost`. `DefaultDataAdapter` never reads indexes and was unaffected.
+
 ### Changed
 - **No data migration needed.** The on-disk format is byte-identical to 3.x. The official SignalDB adapters all broke their v1 storage layout; this one reads 3.x files as-is.
 - **Awaited durability.** With core 2.x, `await collection.insert(...)` resolves after the file lands. The 3.x background-save window is gone.

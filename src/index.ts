@@ -422,8 +422,9 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
       if (cached) return cached;
       const index = new Map<string | null, Set<ID>>();
       for (const item of await readItems()) {
+        // Null/missing values live under the null key; core's null, $exists:false
+        // and $ne lookups read it.
         const key = serializeValue(getFieldValue(item, field));
-        if (key === null) continue;
         let ids = index.get(key);
         if (!ids) {
           ids = new Set();

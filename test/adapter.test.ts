@@ -400,7 +400,7 @@ test('Index lifecycle: create, read, drop', async () => {
   await expect(adapter.readIndex('value')).rejects.toThrow('Index on field "value" does not exist');
 });
 
-test('readIndex supports dot-notation fields and skips nulls', async () => {
+test('readIndex supports dot-notation fields and keys nulls under null', async () => {
   interface NestedData {
     id: string;
     author?: { id: string };
@@ -416,8 +416,23 @@ test('readIndex supports dot-notation fields and skips nulls', async () => {
   await adapter.createIndex('author.id');
   const index = await adapter.readIndex('author.id');
   expect(index.get('a1')).toEqual(new Set(['1', '2']));
-  expect(index.has(null)).toBe(false);
-  expect(index.size).toBe(1);
+  expect(index.get(null)).toEqual(new Set(['3']));
+  expect(index.size).toBe(2);
+});
+
+test('AsyncDataAdapter null, $exists:false and $ne queries on an indexed field', async () => {
+  const { Collection, AsyncDataAdapter } = await import('@signaldb/core');
+  const data_adapter = new AsyncDataAdapter({ storage: () => createAdapter<any>('null-query.json') });
+  const collection = new Collection<any>('null-query', data_adapter, { indices: ['tag'] });
+  await collection.isReady();
+  await collection.insertMany([{ id: '1', tag: 'a' }, { id: '2' }, { id: '3', tag: null }]);
+
+  const ids = async (selector: object) =>
+    (await collection.find(selector, { async: true }).fetch()).map((item: any) => item.id).sort();
+  expect(await ids({ tag: null })).toEqual(['2', '3']);
+  expect(await ids({ tag: { $exists: false } })).toEqual(['2']);
+  expect(await ids({ tag: { $ne: 'a' } })).toEqual(['2', '3']);
+  expect(await ids({ tag: 'a' })).toEqual(['1']);
 });
 
 test('Encryption creates encrypted files', async () => {
