@@ -16,8 +16,6 @@ export interface SecurityOptions {
   allowPlaintextFallback: boolean;
   /** Validate decrypted data structure */
   validateDecryptedData: boolean;
-  /** Whether callback errors should propagate */
-  propagateCallbackErrors: boolean;
   /** Custom data validator function */
   dataValidator: <T>(data: unknown) => data is T[];
   /** Create backup files on save (default: false) */

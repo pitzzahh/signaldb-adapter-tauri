@@ -26,18 +26,6 @@ const VERSION_PREFIX = 'v';
 
 // ─── Internal helpers ───────────────────────────────────────────────────
 
-/** Concatenate Uint8Arrays into a single buffer. */
-function concat(...arrays: Uint8Array[]): Uint8Array {
-  const total = arrays.reduce((sum, a) => sum + a.byteLength, 0);
-  const result = new Uint8Array(total);
-  let offset = 0;
-  for (const a of arrays) {
-    result.set(a, offset);
-    offset += a.byteLength;
-  }
-  return result;
-}
-
 /**
  * Derive an AES-256-GCM key from key material using PBKDF2.
  */
@@ -185,7 +173,11 @@ export function createEncryption(
       plaintext,
     );
 
-    const binaryPayload = concat(salt, iv, new Uint8Array(encrypted));
+    const encryptedBytes = new Uint8Array(encrypted);
+    const binaryPayload = new Uint8Array(SALT_LENGTH + IV_LENGTH + encryptedBytes.byteLength);
+    binaryPayload.set(salt, 0);
+    binaryPayload.set(iv, SALT_LENGTH);
+    binaryPayload.set(encryptedBytes, SALT_LENGTH + IV_LENGTH);
     return encodeVersionedPayload(activeVersion, binaryPayload);
   };
 

@@ -1,8 +1,7 @@
 /**
  * Hardening tests for fixes shipped after v2.3.0.
- * Covers: destructured methods, serialized saves, structuredClone
- * callbacks, stricter filenames, non-function encryption options,
- * undefined changes, non-array payloads, passphrase warnings,
+ * Covers: destructured methods, serialized writes, stricter filenames,
+ * non-function encryption options, non-array payloads, passphrase warnings,
  * large encrypted payloads, corrupt-file warnings, rename failures,
  * and backup/verify/cleanup failure warnings.
  */
@@ -96,78 +95,136 @@ afterEach(() => {
 
 // ─── Destructured methods (no `this` dependency) ───
 
-test('Destructured register/load/save work without `this`', async () => {
+test('Destructured setup/readAll/insert work without `this`', async () => {
   const adapter = createAdapter<TestData>('destructured.json');
-  const { register, load, save } = adapter;
+  const { setup, readAll, insert } = adapter;
 
-  await register(mock());
-  const data: TestData[] = [{ id: '1', name: 'detached', value: 7 }];
-  await save(data, { added: data, modified: [], removed: [] });
+  await setup();
+  await insert([{ id: '1', name: 'detached', value: 7 }]);
 
-  const result = await load();
-  expect(result.items).toEqual(data);
+  expect(await readAll()).toEqual([{ id: '1', name: 'detached', value: 7 }]);
 });
 
-// ─── Serialized saves ───
+// ─── Serialized writes ───
 
-test('Concurrent saves serialize: last queued write wins exactly', async () => {
+test('Concurrent inserts serialize: nothing is lost', async () => {
   const adapter = createAdapter<TestData>('queued.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
-  const a: TestData[] = [{ id: 'a', name: 'first', value: 1 }];
-  const b: TestData[] = [{ id: 'b', name: 'second', value: 2 }];
-  const c: TestData[] = [{ id: 'c', name: 'third', value: 3 }];
-
+  // insertMany fans out over Promise.all, so this is the normal path, not an edge.
   await Promise.all([
-    adapter.save(a, { added: a, modified: [], removed: [] }),
-    adapter.save(b, { added: b, modified: [], removed: [] }),
-    adapter.save(c, { added: c, modified: [], removed: [] }),
+    adapter.insert([{ id: 'a', name: 'first', value: 1 }]),
+    adapter.insert([{ id: 'b', name: 'second', value: 2 }]),
+    adapter.insert([{ id: 'c', name: 'third', value: 3 }]),
   ]);
 
-  // Queue order is submission order, so the last submission wins intact.
-  const result = await adapter.load();
-  expect(result.items).toEqual(c);
+  expect(await adapter.readAll()).toEqual([
+    { id: 'a', name: 'first', value: 1 },
+    { id: 'b', name: 'second', value: 2 },
+    { id: 'c', name: 'third', value: 3 },
+  ]);
 });
 
-test('A failed save does not break the queue for later saves', async () => {
-  const adapter = createAdapter<TestData>('queue-recovery.json', {
+test('Same-tick writes batch into one file rewrite', async () => {
+  const adapter = createAdapter<TestData>('batched.json');
+  await adapter.setup();
+
+  mock_write_file.mockClear();
+  await Promise.all([
+    adapter.insert([{ id: 'a', name: 'first', value: 1 }]),
+    adapter.insert([{ id: 'b', name: 'second', value: 2 }]),
+    adapter.insert([{ id: 'c', name: 'third', value: 3 }]),
+  ]);
+
+  expect(await adapter.readAll()).toEqual([
+    { id: 'a', name: 'first', value: 1 },
+    { id: 'b', name: 'second', value: 2 },
+    { id: 'c', name: 'third', value: 3 },
+  ]);
+  const temp_writes = mock_write_file.mock.calls.filter(([name]) =>
+    (name as string).includes('.tmp.')
+  );
+  expect(temp_writes.length).toBe(1);
+});
+
+test('Sequential awaits stay in separate batches', async () => {
+  const adapter = createAdapter<TestData>('unbatched.json');
+  await adapter.setup();
+
+  mock_write_file.mockClear();
+  await adapter.insert([{ id: 'a', name: 'first', value: 1 }]);
+  await adapter.insert([{ id: 'b', name: 'second', value: 2 }]);
+  await adapter.insert([{ id: 'c', name: 'third', value: 3 }]);
+
+  const temp_writes = mock_write_file.mock.calls.filter(([name]) =>
+    (name as string).includes('.tmp.')
+  );
+  expect(temp_writes.length).toBe(3);
+});
+
+test('A failing batch rejects every op with the same error', async () => {
+  const adapter = createAdapter<TestData>('batch-fail.json', {
     encrypt: async () => { throw new Error('boom'); },
     decrypt: async (encrypted) => JSON.parse(encrypted),
   });
-  await adapter.register(mock()).catch(() => {});
-  // Register fails (encrypt throws on init), but save queue must still settle.
-  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
-  expect(
-    adapter.save(data, { added: data, modified: [], removed: [] })
-  ).rejects.toThrow();
-  // Second save also rejects instead of hanging on a broken chain.
-  expect(
-    adapter.save(data, { added: data, modified: [], removed: [] })
-  ).rejects.toThrow();
+  await adapter.setup().catch(() => {});
+
+  const results = await Promise.allSettled([
+    adapter.insert([{ id: 'a', name: 'first', value: 1 }]),
+    adapter.insert([{ id: 'b', name: 'second', value: 2 }]),
+    adapter.insert([{ id: 'c', name: 'third', value: 3 }]),
+  ]);
+
+  expect(results.length).toBe(3);
+  for (const result of results) {
+    expect(result.status).toBe('rejected');
+    if (result.status === 'rejected') {
+      expect((result.reason as Error).message).toBe('Failed to encrypt data for batch-fail.json');
+    }
+  }
 });
 
-// ─── structuredClone callback ───
+test('Mixed concurrent writes serialize without losing updates', async () => {
+  const adapter = createAdapter<TestData>('queued-mixed.json');
+  await adapter.setup();
+  await adapter.insert([
+    { id: 'keep', name: 'keep', value: 0 },
+    { id: 'drop', name: 'drop', value: 0 },
+  ]);
 
-test('Callback receives Date instances, file stores ISO strings', async () => {
-  interface DatedItem {
-    id: string;
-    at: Date;
-  }
-  const adapter = createAdapter<DatedItem>('dates.json');
-  let callback_data: any = null;
-  await adapter.register((data: any) => { callback_data = data; });
+  await Promise.all([
+    adapter.insert([{ id: 'new', name: 'new', value: 1 }]),
+    adapter.replace([{ id: 'keep', name: 'kept', value: 2 }]),
+    adapter.remove([{ id: 'drop', name: 'drop', value: 0 }]),
+  ]);
 
-  const stamped = new Date('2026-03-15T12:00:00.000Z');
-  const items: DatedItem[] = [{ id: '1', at: stamped }];
-  await adapter.save(items, { added: items, modified: [], removed: [] });
+  expect(await adapter.readAll()).toEqual([
+    { id: 'keep', name: 'kept', value: 2 },
+    { id: 'new', name: 'new', value: 1 },
+  ]);
+});
 
-  expect(callback_data.items[0].at).toBeInstanceOf(Date);
-  expect(callback_data.items[0].at.getTime()).toBe(stamped.getTime());
+test('A failed write does not break the queue for later writes', async () => {
+  let should_fail = true;
+  const adapter = createAdapter<TestData>('queue-recovery.json', {
+    encrypt: async (data) => {
+      if (should_fail) throw new Error('boom');
+      return JSON.stringify(data);
+    },
+    decrypt: async (encrypted) => JSON.parse(encrypted),
+  });
+  await adapter.setup().catch(() => {});
+  // Setup fails (encrypt throws on init), but the write queue must still settle.
+  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
+  await expect(adapter.insert(data)).rejects.toThrow('Failed to encrypt data for queue-recovery.json');
+  // Second write also rejects instead of hanging on a broken chain.
+  await expect(adapter.insert(data)).rejects.toThrow('Failed to encrypt data for queue-recovery.json');
 
-  const raw = new TextDecoder().decode(
-    mock_file_system.get(`${BaseDirectory.AppLocalData}/dates.json`)!
-  );
-  expect(raw).toContain('2026-03-15T12:00:00.000Z');
+  // And the queue recovers once the failure clears.
+  should_fail = false;
+  await adapter.setup();
+  await adapter.insert(data);
+  expect(await adapter.readAll()).toEqual(data);
 });
 
 // ─── Stricter filenames ───
@@ -187,7 +244,7 @@ test('Strict filenames are rejected', () => {
     'trailingdot.',
     'trailingspace ',
     '.',
-    'control.json',
+    'file\x01control.json',
   ];
   for (const filename of bad) {
     expect(() => createAdapter<TestData>(filename), filename).toThrow();
@@ -212,26 +269,12 @@ test('enforceEncryption rejects non-function encrypt/decrypt', () => {
   })).toThrow('Encryption enforced but encrypt/decrypt not provided.');
 });
 
-// ─── Undefined changes ───
-
-test('save with undefined changes falls back to full save', async () => {
-  const adapter = createAdapter<TestData>('undef.json');
-  await adapter.register(mock());
-
-  const data: TestData[] = [{ id: '1', name: 'full', value: 1 }];
-  // @ts-expect-error testing runtime hardening
-  await adapter.save(data, undefined);
-
-  const result = await adapter.load();
-  expect(result.items).toEqual(data);
-});
-
 // ─── Non-array encrypted payload ───
 
 test('Builtin decrypt rejects payloads that are not arrays', async () => {
   const { encrypt, decrypt } = createEncryption('long-enough-passphrase');
   const enc = await encrypt('just-a-string' as any);
-  expect(decrypt(enc)).rejects.toThrow('not an array');
+  await expect(decrypt(enc)).rejects.toThrow('not an array');
 });
 
 // ─── Passphrase warnings ───
@@ -259,16 +302,14 @@ test('200KB payload survives encryption round-trip', async () => {
 
 // ─── Corrupt file warning ───
 
-test('Corrupt JSON loads empty and warns loudly', async () => {
+test('Corrupt JSON reads empty and warns loudly', async () => {
   mock_file_system.set(
     `${BaseDirectory.AppLocalData}/corrupt.json`,
     new TextEncoder().encode('{not valid json')
   );
   const adapter = createAdapter<TestData>('corrupt.json');
 
-  const result = await adapter.load();
-
-  expect(result.items).toEqual([]);
+  expect(await adapter.readAll()).toEqual([]);
   expect(warnings.some((w) => w.includes('[DATA]'))).toBe(true);
 });
 
@@ -276,16 +317,15 @@ test('Corrupt JSON loads empty and warns loudly', async () => {
 
 test('Failed atomic rename throws and leaves no temp files', async () => {
   const adapter = createAdapter<TestData>('rename-fail.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   mock_rename_fn.mockImplementationOnce(async () => {
     throw new Error('rename failed');
   });
 
-  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
-  expect(
-    adapter.save(data, { added: data, modified: [], removed: [] })
-  ).rejects.toThrow('Failed to save rename-fail.json');
+  await expect(
+    adapter.insert([{ id: '1', name: 'x', value: 1 }])
+  ).rejects.toThrow('Failed to write rename-fail.json');
 
   const leftovers = Array.from(mock_file_system.keys()).filter((k) => k.includes('.tmp.'));
   expect(leftovers).toEqual([]);
@@ -302,18 +342,17 @@ test('validateDecryptedData false returns raw JSON as-is', async () => {
     security: { validateDecryptedData: false },
   });
 
-  const result = await adapter.load();
   // Cast: validation is off, so the runtime value is intentionally not T[].
-  expect(result.items as unknown as { a: number }).toEqual({ a: 1 });
+  expect((await adapter.readAll()) as unknown as { a: number }).toEqual({ a: 1 });
 });
 
 // ─── Failure-path warnings (backup, verify, cleanup) ───
 
-test('Backup pruning failure warns but save succeeds', async () => {
+test('Backup pruning failure warns but write succeeds', async () => {
   const adapter = createAdapter<TestData>('prune-fail.json', {
     security: { createBackups: true, maxBackups: 1 },
   });
-  await adapter.register(mock());
+  await adapter.setup();
 
   // Seed two backups so pruning must remove the oldest.
   const base = BaseDirectory.AppLocalData;
@@ -324,24 +363,22 @@ test('Backup pruning failure warns but save succeeds', async () => {
     throw new Error('remove failed');
   });
 
-  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
-  await adapter.save(data, { added: data, modified: [], removed: [] });
+  await adapter.insert([{ id: '1', name: 'x', value: 1 }]);
 
   expect(warnings.some((w) => w.includes('Failed to remove old backup'))).toBe(true);
 });
 
-test('Backup listing failure warns but save succeeds', async () => {
+test('Backup listing failure warns but write succeeds', async () => {
   const adapter = createAdapter<TestData>('backup-list-fail.json', {
     security: { createBackups: true },
   });
-  await adapter.register(mock());
+  await adapter.setup();
 
   mock_read_dir.mockImplementationOnce(async () => {
     throw new Error('readDir failed');
   });
 
-  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
-  await adapter.save(data, { added: data, modified: [], removed: [] });
+  await adapter.insert([{ id: '1', name: 'x', value: 1 }]);
 
   expect(warnings.some((w) => w.includes('Failed to cleanup old backups'))).toBe(true);
 });
@@ -351,10 +388,10 @@ test('Decrypted data failing validation propagates without wrapping', async () =
     encrypt: async (data) => JSON.stringify(data),
     decrypt: async () => ({ not: 'an-array' }) as any,
   });
-  await adapter.register(mock());
+  await adapter.setup();
 
   // Anchored: a 'Failed to load' prefix would mean the error got wrapped.
-  expect(adapter.load()).rejects.toThrow(/^Decryption failed, plaintext fallback disabled/);
+  await expect(adapter.readAll()).rejects.toThrow(/^Decryption failed, plaintext fallback disabled/);
 });
 
 test('Fallback plaintext failing validation reports both failures', async () => {
@@ -365,7 +402,7 @@ test('Fallback plaintext failing validation reports both failures', async () => 
     },
     security: { allowPlaintextFallback: true },
   });
-  await adapter.register(mock());
+  await adapter.setup();
 
   // Valid JSON, but not an array: parses, then fails validation.
   mock_file_system.set(
@@ -373,41 +410,28 @@ test('Fallback plaintext failing validation reports both failures', async () => 
     new TextEncoder().encode(JSON.stringify({ a: 1 }))
   );
 
-  expect(adapter.load()).rejects.toThrow('Decryption and plaintext parse both failed');
+  await expect(adapter.readAll()).rejects.toThrow('Decryption and plaintext parse both failed');
 });
 
-test('Register warns and continues when initial load fails', async () => {
-  const adapter = createAdapter<TestData>('register-load-fail.json');
-
-  mock_read_file.mockImplementationOnce(async () => {
-    throw new Error('EACCES: permission denied');
-  });
-
-  await adapter.register(mock());
-
-  expect(warnings.some((w) => w.includes('Failed to load initial data'))).toBe(true);
-});
-
-test('Backup creation failure warns but save succeeds', async () => {
+test('Backup creation failure warns but write succeeds', async () => {
   const adapter = createAdapter<TestData>('backup-create-fail.json', {
     security: { createBackups: true },
   });
-  await adapter.register(mock());
+  await adapter.setup();
 
-  // First write in the save flow is the backup write.
+  // First write in the write flow is the backup write.
   mock_write_file.mockImplementationOnce(async () => {
     throw new Error('disk full');
   });
 
-  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
-  await adapter.save(data, { added: data, modified: [], removed: [] });
+  await adapter.insert([{ id: '1', name: 'x', value: 1 }]);
 
   expect(warnings.some((w) => w.includes('Failed to create backup'))).toBe(true);
 });
 
-test('Temp file verification mismatch warns and fails the save', async () => {
+test('Temp file verification mismatch warns and fails the write', async () => {
   const adapter = createAdapter<TestData>('verify-fail.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   // Simulate disk corruption: the temp write lands with different bytes,
   // so the verify read does not match what was written.
@@ -416,10 +440,9 @@ test('Temp file verification mismatch warns and fails the save', async () => {
     mock_file_system.set(`${base_dir}/${filename}`, new TextEncoder().encode('tampered'));
   });
 
-  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
-  expect(
-    adapter.save(data, { added: data, modified: [], removed: [] })
-  ).rejects.toThrow('Failed to save verify-fail.json');
+  await expect(
+    adapter.insert([{ id: '1', name: 'x', value: 1 }])
+  ).rejects.toThrow('Failed to write verify-fail.json');
 
   expect(warnings.some((w) => w.includes('Failed to verify temporary file'))).toBe(true);
   // No temp leftovers, and the original file is untouched.
@@ -433,7 +456,7 @@ test('Temp file verification mismatch warns and fails the save', async () => {
 
 test('Temp cleanup failure after write error warns', async () => {
   const adapter = createAdapter<TestData>('cleanup-fail.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   mock_rename_fn.mockImplementationOnce(async () => {
     throw new Error('rename failed');
@@ -442,17 +465,16 @@ test('Temp cleanup failure after write error warns', async () => {
     throw new Error('remove failed');
   });
 
-  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
-  expect(
-    adapter.save(data, { added: data, modified: [], removed: [] })
-  ).rejects.toThrow('Failed to save cleanup-fail.json');
+  await expect(
+    adapter.insert([{ id: '1', name: 'x', value: 1 }])
+  ).rejects.toThrow('Failed to write cleanup-fail.json');
 
   expect(warnings.some((w) => w.includes('Failed to cleanup temp file'))).toBe(true);
 });
 
-// ─── Audit fixes: fail-closed saves ───
+// ─── Audit fixes: fail-closed writes ───
 
-test('Save refuses to overwrite a corrupt file', async () => {
+test('Writes refuse to overwrite a corrupt file', async () => {
   const corrupt = '{truncated-partial-data';
   mock_file_system.set(
     `${BaseDirectory.AppLocalData}/corrupt-save.json`,
@@ -460,15 +482,15 @@ test('Save refuses to overwrite a corrupt file', async () => {
   );
   const adapter = createAdapter<TestData>('corrupt-save.json');
 
-  // load() still returns empty for backwards compat...
-  const loaded = await adapter.load();
-  expect(loaded.items).toEqual([]);
+  // readAll still returns empty for backwards compat...
+  expect(await adapter.readAll()).toEqual([]);
 
-  // ...but save() refuses instead of destroying the corrupt bytes.
+  // ...but every mutating op refuses instead of destroying the corrupt bytes.
   const data: TestData[] = [{ id: '1', name: 'new', value: 1 }];
-  expect(
-    adapter.save(data, { added: data, modified: [], removed: [] })
-  ).rejects.toThrow('Refusing to save');
+  await expect(adapter.insert(data)).rejects.toThrow('refusing to write');
+  await expect(adapter.replace(data)).rejects.toThrow('refusing to write');
+  await expect(adapter.remove(data)).rejects.toThrow('refusing to write');
+  await expect(adapter.removeAll()).rejects.toThrow('refusing to write');
 
   const raw = new TextDecoder().decode(
     mock_file_system.get(`${BaseDirectory.AppLocalData}/corrupt-save.json`)!
@@ -490,14 +512,13 @@ test('maxBackups:0 keeps no backups', async () => {
   const adapter = createAdapter<TestData>('no-backups.json', {
     security: { createBackups: true, maxBackups: 0 },
   });
-  await adapter.register(mock());
+  await adapter.setup();
 
   const base = BaseDirectory.AppLocalData;
   mock_file_system.set(`${base}/no-backups.json.backup.old-1`, new TextEncoder().encode('x'));
   mock_file_system.set(`${base}/no-backups.json.backup.old-2`, new TextEncoder().encode('x'));
 
-  const data: TestData[] = [{ id: '1', name: 'x', value: 1 }];
-  await adapter.save(data, { added: data, modified: [], removed: [] });
+  await adapter.insert([{ id: '1', name: 'x', value: 1 }]);
 
   const backups = Array.from(mock_file_system.keys()).filter((k) =>
     k.includes('no-backups.json.backup.')
@@ -505,7 +526,7 @@ test('maxBackups:0 keeps no backups', async () => {
   expect(backups).toEqual([]);
 });
 
-test('save with undefined changes overwrites stale disk data', async () => {
+test('replace overwrites stale same-id disk data', async () => {
   const stale: TestData[] = [{ id: '1', name: 'OLD', value: 1 }];
   mock_file_system.set(
     `${BaseDirectory.AppLocalData}/stale.json`,
@@ -514,27 +535,24 @@ test('save with undefined changes overwrites stale disk data', async () => {
   const adapter = createAdapter<TestData>('stale.json');
 
   const fresh: TestData[] = [{ id: '1', name: 'NEW', value: 2 }];
-  // @ts-expect-error testing runtime hardening
-  await adapter.save(fresh, undefined);
+  await adapter.replace(fresh);
 
-  const result = await adapter.load();
-  expect(result.items).toEqual(fresh);
+  expect(await adapter.readAll()).toEqual(fresh);
 });
 
-test('added items upsert instead of duplicating same-id entries', async () => {
+test('Batch insert upserts same-id entries instead of duplicating', async () => {
   const adapter = createAdapter<TestData>('upsert.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   const initial: TestData[] = [{ id: '1', name: 'one', value: 1 }];
-  await adapter.save(initial, { added: initial, modified: [], removed: [] });
+  await adapter.insert(initial);
 
-  // 'added' re-states an existing id: must replace, not duplicate.
+  // 'insert' re-states an existing id: must replace, not duplicate.
   const next: TestData[] = [
     { id: '1', name: 'one-updated', value: 10 },
     { id: '2', name: 'two', value: 2 },
   ];
-  await adapter.save(next, { added: next, modified: [], removed: [] });
+  await adapter.insert(next);
 
-  const result = await adapter.load();
-  expect(result.items).toEqual(next);
+  expect(await adapter.readAll()).toEqual(next);
 });
