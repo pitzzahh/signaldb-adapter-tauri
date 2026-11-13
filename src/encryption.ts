@@ -5,7 +5,7 @@
  */
 
 import type { EncryptedPayload, EncryptionOptions } from './types';
-import { eMsg, encoder, decoder } from './utils';
+import { eMsg, encoder, decoder, JSON_CODEC } from './utils';
 
 /** Salt length in bytes (128 bits) */
 const SALT_LENGTH = 16;
@@ -233,5 +233,6 @@ export function createEncryption(
     return parsed_data;
   };
 
+  (encrypt as any)[JSON_CODEC] = (decrypt as any)[JSON_CODEC] = true;
   return { encrypt, decrypt };
 }

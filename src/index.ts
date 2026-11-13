@@ -14,7 +14,7 @@ import {
   rename
 } from '@tauri-apps/plugin-fs';
 import type { SecurityOptions, AdapterOptions } from './types';
-import { eMsg, encoder, decoder } from './utils';
+import { eMsg, encoder, decoder, isJsonCodec } from './utils';
 
 /** Present-but-unreadable file: reads map it to empty, writes refuse it. */
 class CorruptDataError extends Error {
@@ -130,6 +130,10 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
   };
   let snapshot: Snapshot | null = null;
   const emptySnapshot = (): Snapshot => ({ text: '', items: [], indexes: new Map() });
+  // Written items can only be cached as what a read would decode when the
+  // codec is plain JSON. Any other codec gets decoded on the next read.
+  const jsonCodec = !options?.encrypt ||
+    (isJsonCodec(options.encrypt) && isJsonCodec(options.decrypt));
   // Backup names known to this instance (newest first). Seeded once from
   // the directory so per-write pruning needs no readDir scan.
   let knownBackups: string[] | null = null;
@@ -307,15 +311,17 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         newPathBaseDir: base_dir
       });
 
-      // Cache what a read of this file would return: plain JSON parses back
-      // exactly; encrypted data relies on decrypt(encrypt(x)) matching x.
-      // Anything uncloneable or invalid is left for the next read to decode.
-      try {
-        const saved: T[] = options?.encrypt ? structuredClone(items) : JSON.parse(data_to_save);
-        validate(saved, 'Written data failed validation');
-        snapshot = { text: data_to_save, items: saved, indexes: new Map() };
-      } catch {
-        snapshot = null;
+      // Cache what a read of this file would decode; invalid data is left
+      // for the next read to reject.
+      snapshot = null;
+      if (jsonCodec) {
+        try {
+          const saved: T[] = JSON.parse(options?.encrypt ? JSON.stringify(items) : data_to_save);
+          validate(saved, 'Written data failed validation');
+          snapshot = { text: data_to_save, items: saved, indexes: new Map() };
+        } catch {
+          // Leave snapshot null.
+        }
       }
 
     } catch (writeError) {
@@ -411,7 +417,7 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         await writeFile(filename, encoder.encode(initial_data), {
           baseDir: base_dir
         });
-        snapshot = { text: initial_data, items: [], indexes: new Map() };
+        snapshot = jsonCodec ? { text: initial_data, items: [], indexes: new Map() } : null;
       } catch (error) {
         throw new Error(`Failed to initialize file ${filename}`, { cause: error });
       }

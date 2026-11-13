@@ -6,7 +6,7 @@
 
 Filesystem persistence for [SignalDB](https://github.com/maxnowack/signaldb) in Tauri apps. One file per collection, with optional AES-256-GCM encryption.
 
-6.38 KB minified (adapter only, 2.47 KB for encryption). Zero runtime dependencies.
+6.52 KB minified (adapter only, 2.58 KB for encryption). Zero runtime dependencies.
 
 ## Install
 
@@ -202,7 +202,7 @@ Why this shape: the vault password is the only secret the user must remember, an
 |--------|------|---------|-------------|
 | `base_dir` | `BaseDirectory` | `AppLocalData` | Tauri base directory for file storage |
 | `encrypt` | `(data: T[]) => Promise<string>` | `undefined` | Custom encryption function (requires `decrypt`) |
-| `decrypt` | `(encrypted: string) => Promise<T[]>` | `undefined` | Custom decryption function (requires `encrypt`) |
+| `decrypt` | `(encrypted: string) => Promise<T[]>` | `undefined` | Custom decryption function (requires `encrypt`). With a custom pair, the read after each write decrypts the file; `createEncryption` skips that. |
 | `security` | `Partial<SecurityOptions>` | `{}` | Security configuration options |
 
 ```typescript
