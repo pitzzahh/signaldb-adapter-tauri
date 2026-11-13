@@ -119,15 +119,25 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
 
   // No index files on disk; readIndex builds the answer from file data.
   const createdIndexes = new Set<string>();
-  // Cached readIndex results, cleared on every successful write.
-  const indexCache = new Map<string, Map<string | null, Set<ID>>>();
+  // The last file contents this instance read or wrote, with their decoded
+  // items and any readIndex results built from them. Reads still hit the
+  // disk, but identical bytes skip decrypt/parse/validate, so an external
+  // edit or a second instance is always seen. Never hand items out
+  // uncloned: callers mutating them would corrupt the next write.
+  type Snapshot = {
+    text: string;
+    items: T[];
+    indexes: Map<string, Map<string | null, Set<ID>>>;
+  };
+  let snapshot: Snapshot | null = null;
+  const emptySnapshot = (): Snapshot => ({ text: '', items: [], indexes: new Map() });
   // Backup names known to this instance (newest first). Seeded once from
   // the directory so per-write pruning needs no readDir scan.
   let knownBackups: string[] | null = null;
   // Serializes read-modify-write so concurrent writes cannot lose updates.
   let writeQueue: Promise<void> = Promise.resolve();
 
-  const readItemsInternal = async (): Promise<T[]> => {
+  const readItemsInternal = async (): Promise<Snapshot> => {
     try {
       let contents: Uint8Array;
       try {
@@ -138,15 +148,16 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         // rest, so an unfamiliar "not found" wording cannot wedge reads.
         const msg = eMsg(error).toLowerCase();
         if (msg.includes('not found') || msg.includes('no such file')) {
-          return [];
+          return emptySnapshot();
         }
         const stillThere = await exists(filename, { baseDir: base_dir }).catch(() => true);
-        if (!stillThere) return [];
+        if (!stillThere) return emptySnapshot();
         throw error;
       }
 
       const text_content = decoder.decode(contents);
-      if (text_content.length === 0 || !/\S/.test(text_content)) return [];
+      if (text_content.length === 0 || !/\S/.test(text_content)) return emptySnapshot();
+      if (snapshot?.text === text_content) return snapshot;
 
       let decrypted_data: T[];
 
@@ -191,7 +202,8 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         }
       }
 
-      return decrypted_data;
+      snapshot = { text: text_content, items: decrypted_data, indexes: new Map() };
+      return snapshot;
     } catch (error) {
       if (error instanceof CorruptDataError) throw error;
       const errorMsg = eMsg(error);
@@ -204,13 +216,13 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
     }
   };
 
-  const readItems = async (): Promise<T[]> => {
+  const readItems = async (): Promise<Snapshot> => {
     try {
       return await readItemsInternal();
     } catch (error) {
       if (error instanceof CorruptDataError) {
         console.warn(`[DATA] Corrupt JSON in ${filename}, loading as empty.`, error.cause ?? error);
-        return [];
+        return emptySnapshot();
       }
       throw error;
     }
@@ -292,6 +304,17 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         newPathBaseDir: base_dir
       });
 
+      // Cache what a read of this file would return: plain JSON parses back
+      // exactly; encrypted data relies on decrypt(encrypt(x)) matching x.
+      // Anything uncloneable or invalid is left for the next read to decode.
+      try {
+        const saved: T[] = options?.encrypt ? structuredClone(items) : JSON.parse(data_to_save);
+        validate(saved, 'Written data failed validation');
+        snapshot = { text: data_to_save, items: saved, indexes: new Map() };
+      } catch {
+        snapshot = null;
+      }
+
     } catch (writeError) {
       try {
         const tempExists = await exists(temp_filename, { baseDir: base_dir });
@@ -331,7 +354,7 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
           const fail = (error: unknown) => batch.forEach((op) => op.reject(error));
           let current: T[];
           try {
-            current = await readItemsInternal();
+            current = (await readItemsInternal()).items;
           } catch (error) {
             fail(new Error(
               `Failed to read ${filename}: refusing to write to prevent data loss.`,
@@ -356,7 +379,6 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
           }
           try {
             await writeItems([...working.values()]);
-            indexCache.clear();
           } catch (error) {
             fail(error);
             return;
@@ -385,15 +407,16 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         await writeFile(filename, encoder.encode(initial_data), {
           baseDir: base_dir
         });
+        snapshot = { text: initial_data, items: [], indexes: new Map() };
       } catch (error) {
         throw new Error(`Failed to initialize file ${filename}`, { cause: error });
       }
     },
     teardown: async () => {},
-    readAll: readItems,
+    readAll: async () => structuredClone((await readItems()).items),
     async readIds(ids) {
       const wanted = new Set(ids);
-      return (await readItems()).filter((item) => wanted.has(item.id));
+      return structuredClone((await readItems()).items.filter((item) => wanted.has(item.id)));
     },
     async createIndex(field) {
       createdIndexes.add(field);
@@ -402,16 +425,18 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
       if (!createdIndexes.delete(field)) {
         throw new Error(`Index on field "${field}" does not exist`);
       }
-      indexCache.delete(field);
     },
     async readIndex(field) {
       if (!createdIndexes.has(field)) {
         throw new Error(`Index on field "${field}" does not exist`);
       }
-      const cached = indexCache.get(field);
+      // Cached on the snapshot it was built from, so a write that lands
+      // mid-build can never leave a stale index behind.
+      const current = await readItems();
+      const cached = current.indexes.get(field);
       if (cached) return cached;
       const index = new Map<string | null, Set<ID>>();
-      for (const item of await readItems()) {
+      for (const item of current.items) {
         // Null/missing values live under the null key; core's null, $exists:false
         // and $ne lookups read it.
         const key = serializeValue(getFieldValue(item, field));
@@ -422,7 +447,7 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         }
         ids.add(item.id);
       }
-      indexCache.set(field, index);
+      current.indexes.set(field, index);
       return index;
     },
     insert: (items) => mutate((current) => upsert(current, items)),

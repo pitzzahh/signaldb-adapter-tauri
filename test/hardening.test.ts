@@ -414,11 +414,13 @@ test('Backup listing failure warns but write succeeds', async () => {
 });
 
 test('Decrypted data failing validation propagates without wrapping', async () => {
-  const adapter = createAdapter<TestData>('decrypt-invalid.json', {
-    encrypt: async (data) => JSON.stringify(data),
+  const codec = {
+    encrypt: async (data: TestData[]) => JSON.stringify(data),
     decrypt: async () => ({ not: 'an-array' }) as any,
-  });
-  await adapter.setup();
+  };
+  await createAdapter<TestData>('decrypt-invalid.json', codec).setup();
+  // A fresh instance has no cached snapshot, so it must decrypt the file.
+  const adapter = createAdapter<TestData>('decrypt-invalid.json', codec);
 
   // Anchored: a 'Failed to load' prefix would mean the error got wrapped.
   await expect(adapter.readAll()).rejects.toThrow(/^Decryption failed, plaintext fallback disabled/);
@@ -585,4 +587,120 @@ test('Batch insert upserts same-id entries instead of duplicating', async () => 
   await adapter.insert(next);
 
   expect(await adapter.readAll()).toEqual(next);
+});
+
+// ─── Decoded snapshot cache ───
+
+const countingCodec = () => {
+  const codec = {
+    decrypts: 0,
+    encrypt: async (data: unknown[]) => btoa(JSON.stringify(data)),
+    decrypt: async (text: string) => {
+      codec.decrypts++;
+      return JSON.parse(atob(text));
+    },
+  };
+  return codec;
+};
+
+test('Unchanged file contents skip decrypt on later reads and writes', async () => {
+  const codec = countingCodec();
+  const adapter = createAdapter<TestData>('snap-hit.json', codec);
+  await adapter.setup();
+  await adapter.insert([{ id: '1', name: 'a', value: 1 }]);
+  await adapter.insert([{ id: '2', name: 'b', value: 2 }]);
+  await adapter.readAll();
+  await adapter.readIds(['1']);
+  await adapter.createIndex('value');
+  await adapter.readIndex('value');
+
+  // setup wrote the file without a read, and every write cached its own output.
+  expect(codec.decrypts).toBe(0);
+  expect(await adapter.readAll()).toHaveLength(2);
+});
+
+test('An external edit to the file is decoded, not served from cache', async () => {
+  const codec = countingCodec();
+  const adapter = createAdapter<TestData>('snap-external.json', codec);
+  await adapter.setup();
+  await adapter.insert([{ id: '1', name: 'a', value: 1 }]);
+
+  const path = `${BaseDirectory.AppLocalData}/snap-external.json`;
+  mock_file_system.set(path, new TextEncoder().encode(
+    await codec.encrypt([{ id: 'x', name: 'external', value: 9 }])
+  ));
+
+  expect(await adapter.readAll()).toEqual([{ id: 'x', name: 'external', value: 9 }]);
+  await adapter.insert([{ id: '2', name: 'b', value: 2 }]);
+  expect((await adapter.readAll()).map((item) => item.id)).toEqual(['x', '2']);
+  expect(codec.decrypts).toBe(1);
+});
+
+test('Two instances on one file never lose each other\'s writes', async () => {
+  const first = createAdapter<TestData>('snap-shared.json', countingCodec());
+  const second = createAdapter<TestData>('snap-shared.json', countingCodec());
+  await first.setup();
+  await first.insert([{ id: '1', name: 'a', value: 1 }]);
+  await second.insert([{ id: '2', name: 'b', value: 2 }]);
+  await first.insert([{ id: '3', name: 'c', value: 3 }]);
+
+  expect((await second.readAll()).map((item) => item.id)).toEqual(['1', '2', '3']);
+});
+
+test('Mutating read results or written inputs cannot leak into the file', async () => {
+  for (const codec of [undefined, countingCodec()]) {
+    const name = codec ? 'snap-clone-enc.json' : 'snap-clone.json';
+    const adapter = createAdapter<TestData>(name, codec);
+    await adapter.setup();
+    const input = { id: '1', name: 'a', value: 1 };
+    await adapter.insert([input]);
+    input.value = 100;
+
+    const [read] = await adapter.readAll();
+    read.value = 200;
+    const [byId] = await adapter.readIds(['1']);
+    byId.value = 300;
+
+    await adapter.insert([{ id: '2', name: 'b', value: 2 }]);
+    expect(await adapter.readAll()).toEqual([
+      { id: '1', name: 'a', value: 1 },
+      { id: '2', name: 'b', value: 2 },
+    ]);
+  }
+});
+
+test('readIndex racing a write never caches a stale index', async () => {
+  const adapter = createAdapter<TestData>('snap-index-race.json', countingCodec());
+  await adapter.setup();
+  await adapter.insert([{ id: '1', name: 'a', value: 1 }]);
+  await adapter.createIndex('value');
+
+  // Hold readIndex's file read until the write has landed, then hand it
+  // the old bytes: the read-modify-write interleaving that went stale.
+  const path = `${BaseDirectory.AppLocalData}/snap-index-race.json`;
+  const old_bytes = mock_file_system.get(path)!;
+  let release!: () => void;
+  const written = new Promise<void>((resolve) => { release = resolve; });
+  mock_read_file.mockImplementationOnce(async () => {
+    await written;
+    return old_bytes;
+  });
+
+  const stale_read = adapter.readIndex('value');
+  await adapter.insert([{ id: '2', name: 'b', value: 1 }]);
+  release();
+  expect((await stale_read).get('1')).toEqual(new Set(['1']));
+
+  const fresh = await adapter.readIndex('value');
+  expect(fresh.get('1')).toEqual(new Set(['1', '2']));
+});
+
+test('Uncloneable items still write, and the next read decodes the file', async () => {
+  const codec = countingCodec();
+  const adapter = createAdapter<any>('snap-uncloneable.json', codec);
+  await adapter.setup();
+  await adapter.insert([{ id: '1', fn: () => 1 }]);
+
+  expect(await adapter.readAll()).toEqual([{ id: '1' }]);
+  expect(codec.decrypts).toBe(1);
 });
