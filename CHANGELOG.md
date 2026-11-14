@@ -20,7 +20,7 @@
 - **Missing-file detection no longer trusts error strings alone** (`src/index.ts`). When a read fails with an unrecognized message, the adapter asks `exists()` before deciding the file is missing. Known "not found" wordings take the fast path with no extra call.
 
 ### Fixed
-- **`readIndex` can no longer cache a stale index** (`src/index.ts`). Index results are cached on the snapshot they were built from instead of a cache that writes cleared, so a read that started before a write and finished after it cannot outlive that write.
+- **`readIndex` can no longer cache a stale index** (`src/index.ts`). Index results are cached on the snapshot they were built from instead of a cache that writes cleared, so a read that started before a write and finished after it cannot outlive that write. Each call now reads the file like `readAll` does, so a change by another instance or an outside edit is never answered from an old index. That read is the cost: about 12 ms per call for a 5000-item file in a real Tauri v2 app on Linux, where 3.x-era caching returned in under 1 ms. `DefaultDataAdapter` never calls `readIndex`.
 - **`readIndex` keys null and missing values under `null`** (`src/index.ts`). Core's index lookups for `{ field: null }`, `{ field: { $exists: false } }` and `$ne` read that key; skipping it made those queries return nothing on an indexed field under `AsyncDataAdapter`, `AutoFetchDataAdapter` and `WorkerDataAdapterHost`. `DefaultDataAdapter` never reads indexes and was unaffected.
 
 ### Changed
