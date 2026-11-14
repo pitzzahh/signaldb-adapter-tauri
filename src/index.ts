@@ -14,7 +14,7 @@ import {
   rename
 } from '@tauri-apps/plugin-fs';
 import type { SecurityOptions, AdapterOptions } from './types';
-import { eMsg, encoder, decoder } from './utils';
+import { eMsg, encoder, decoder, isJsonCodec } from './utils';
 
 /** Present-but-unreadable file: reads map it to empty, writes refuse it. */
 class CorruptDataError extends Error {
@@ -119,34 +119,69 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
 
   // No index files on disk; readIndex builds the answer from file data.
   const createdIndexes = new Set<string>();
-  // Cached readIndex results, cleared on every successful write.
-  const indexCache = new Map<string, Map<string | null, Set<ID>>>();
+  // Last file contents this instance read or wrote, decoded, plus any
+  // readIndex results built from them. Reads still hit the disk; only
+  // identical bytes skip decrypt/parse/validate. Items leave as clones so
+  // a caller editing them can't change the next write.
+  type Snapshot = {
+    text: string;
+    items: T[];
+    // JSON that parses to items, when known: parsing it beats structuredClone.
+    json?: string;
+    indexes: Map<string, Map<string | null, Set<ID>>>;
+  };
+  let snapshot: Snapshot | null = null;
+  const emptySnapshot = (): Snapshot => ({ text: '', items: [], indexes: new Map() });
+  // createEncryption's pair decodes to exactly the JSON round trip, so its
+  // writes are remembered as plaintext JSON and parsed only when the next
+  // read finds the same bytes: that read skips PBKDF2. Plain stores parse
+  // their file anyway, and other codecs may change data on the way
+  // through, so their writes are simply decoded on the next read.
+  const jsonCodec = !options?.encrypt || (options.jsonCodec ??
+    (isJsonCodec(options.encrypt) && isJsonCodec(options.decrypt)));
+  let written: { text: string; json: string } | null = null;
   // Backup names known to this instance (newest first). Seeded once from
   // the directory so per-write pruning needs no readDir scan.
   let knownBackups: string[] | null = null;
   // Serializes read-modify-write so concurrent writes cannot lose updates.
   let writeQueue: Promise<void> = Promise.resolve();
 
-  const readItemsInternal = async (): Promise<T[]> => {
+  // onRaw receives the file bytes as read, for the write path's backup.
+  const readItemsInternal = async (
+    onRaw?: (raw: Uint8Array) => void
+  ): Promise<Snapshot> => {
     try {
       let contents: Uint8Array;
       try {
         contents = await readFile(filename, { baseDir: base_dir });
+        onRaw?.(contents);
       } catch (error) {
         // Only a missing file reads as empty; I/O errors propagate. The
         // message match covers known backends; exists() disambiguates the
         // rest, so an unfamiliar "not found" wording cannot wedge reads.
         const msg = eMsg(error).toLowerCase();
         if (msg.includes('not found') || msg.includes('no such file')) {
-          return [];
+          return emptySnapshot();
         }
         const stillThere = await exists(filename, { baseDir: base_dir }).catch(() => true);
-        if (!stillThere) return [];
+        if (!stillThere) return emptySnapshot();
         throw error;
       }
 
       const text_content = decoder.decode(contents);
-      if (text_content.length === 0 || !/\S/.test(text_content)) return [];
+      if (text_content.length === 0 || !/\S/.test(text_content)) return emptySnapshot();
+      if (written?.text === text_content) {
+        const { json } = written;
+        written = null;
+        try {
+          const items = JSON.parse(json);
+          validate(items, 'Data failed validation');
+          snapshot = { text: text_content, items, json, indexes: new Map() };
+        } catch {
+          // Fall through and decode the file, which reports the real error.
+        }
+      }
+      if (snapshot?.text === text_content) return snapshot;
 
       let decrypted_data: T[];
 
@@ -191,7 +226,13 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         }
       }
 
-      return decrypted_data;
+      snapshot = {
+        text: text_content,
+        items: decrypted_data,
+        json: options?.decrypt ? undefined : text_content,
+        indexes: new Map(),
+      };
+      return snapshot;
     } catch (error) {
       if (error instanceof CorruptDataError) throw error;
       const errorMsg = eMsg(error);
@@ -204,24 +245,28 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
     }
   };
 
-  const readItems = async (): Promise<T[]> => {
+  const readItems = async (): Promise<Snapshot> => {
     try {
       return await readItemsInternal();
     } catch (error) {
       if (error instanceof CorruptDataError) {
         console.warn(`[DATA] Corrupt JSON in ${filename}, loading as empty.`, error.cause ?? error);
-        return [];
+        return emptySnapshot();
       }
       throw error;
     }
   };
 
-  const writeItems = async (items: T[]): Promise<void> => {
-    if (security.createBackups) {
+  // previous is the file as the guard read saw it, or null if it was missing.
+  const writeItems = async (items: T[], previous: Uint8Array | null): Promise<void> => {
+    // The file is about to change; let the old decoded copy go before the
+    // new one is serialized, so peak memory stays near one copy.
+    snapshot = null;
+    written = null;
+    if (security.createBackups && previous) {
       const backup_filename = createBackupFilename(filename);
       try {
-        const current_content = await readFile(filename, { baseDir: base_dir });
-        await writeFile(backup_filename, current_content, { baseDir: base_dir });
+        await writeFile(backup_filename, previous, { baseDir: base_dir });
         const max = security.maxBackups ?? 5;
         if (knownBackups === null) {
           try {
@@ -292,6 +337,10 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         newPathBaseDir: base_dir
       });
 
+      if (options?.encrypt && jsonCodec) {
+        written = { text: data_to_save, json: JSON.stringify(items) };
+      }
+
     } catch (writeError) {
       try {
         const tempExists = await exists(temp_filename, { baseDir: base_dir });
@@ -310,13 +359,14 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
   // submission order. Sequential awaits always land in separate batches,
   // and every op in a batch shares its fate: all resolve or all reject.
   let openBatch: Array<{
-    update: (current: T[]) => T[] | null;
+    update: (items: Map<ID, T>) => boolean;
     resolve: () => void;
     reject: (error: unknown) => void;
   }> | null = null;
 
-  // update returns the new full state, or null to skip the rewrite.
-  const mutate = (update: (current: T[]) => T[] | null): Promise<void> => {
+  // update edits the batch's working map in place and returns whether it
+  // changed anything; a batch where nothing changed skips the rewrite.
+  const mutate = (update: (items: Map<ID, T>) => boolean): Promise<void> => {
     return new Promise<void>((resolve, reject) => {
       if (openBatch) {
         openBatch.push({ update, resolve, reject });
@@ -329,8 +379,9 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         const run = async (): Promise<void> => {
           const fail = (error: unknown) => batch.forEach((op) => op.reject(error));
           let current: T[];
+          let previous: Uint8Array | null = null;
           try {
-            current = await readItemsInternal();
+            current = (await readItemsInternal((raw) => { previous = raw; })).items;
           } catch (error) {
             fail(new Error(
               `Failed to read ${filename}: refusing to write to prevent data loss.`,
@@ -338,15 +389,12 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
             ));
             return;
           }
-          let next = current;
+          // One map per batch keeps k ops at O(n + k), not O(n * k).
+          const working = new Map(current.map((item) => [item.id, item]));
           let dirty = false;
           try {
             for (const op of batch) {
-              const updated = op.update(next);
-              if (updated !== null) {
-                next = updated;
-                dirty = true;
-              }
+              if (op.update(working)) dirty = true;
             }
           } catch (error) {
             fail(error);
@@ -357,8 +405,7 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
             return;
           }
           try {
-            await writeItems(next);
-            indexCache.clear();
+            await writeItems([...working.values()], previous);
           } catch (error) {
             fail(error);
             return;
@@ -371,18 +418,15 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
     });
   };
 
-  const upsert = (current: T[], incoming: T[]): T[] => {
-    if (incoming.length === 1) {
-      const item = incoming[0];
-      const idx = current.findIndex((c) => c.id === item.id);
-      if (idx === -1) return [...current, item];
-      const next = [...current];
-      next[idx] = item;
-      return next;
-    }
-    const byId = new Map(current.map((item) => [item.id, item]));
-    for (const item of incoming) byId.set(item.id, item);
-    return [...byId.values()];
+  // Map.set keeps an existing id in place and appends a new one.
+  // JSON-codec items are JSON-safe, so a JSON round trip is a faithful
+  // and much cheaper clone than structuredClone.
+  const clone = (items: T[]): T[] =>
+    jsonCodec ? JSON.parse(JSON.stringify(items)) : structuredClone(items);
+
+  const upsert = (items: Map<ID, T>, incoming: T[]): boolean => {
+    for (const item of incoming) items.set(item.id, item);
+    return incoming.length > 0;
   };
 
   return createStorageAdapter<T, ID>({
@@ -395,15 +439,19 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         await writeFile(filename, encoder.encode(initial_data), {
           baseDir: base_dir
         });
+        snapshot = jsonCodec ? { text: initial_data, items: [], json: '[]', indexes: new Map() } : null;
       } catch (error) {
         throw new Error(`Failed to initialize file ${filename}`, { cause: error });
       }
     },
     teardown: async () => {},
-    readAll: readItems,
+    async readAll() {
+      const { items, json } = await readItems();
+      return json ? JSON.parse(json) : clone(items);
+    },
     async readIds(ids) {
       const wanted = new Set(ids);
-      return (await readItems()).filter((item) => wanted.has(item.id));
+      return clone((await readItems()).items.filter((item) => wanted.has(item.id)));
     },
     async createIndex(field) {
       createdIndexes.add(field);
@@ -412,18 +460,21 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
       if (!createdIndexes.delete(field)) {
         throw new Error(`Index on field "${field}" does not exist`);
       }
-      indexCache.delete(field);
     },
     async readIndex(field) {
       if (!createdIndexes.has(field)) {
         throw new Error(`Index on field "${field}" does not exist`);
       }
-      const cached = indexCache.get(field);
+      // Cached on the snapshot it was built from, so a write that lands
+      // mid-build can never leave a stale index behind.
+      const current = await readItems();
+      const cached = current.indexes.get(field);
       if (cached) return cached;
       const index = new Map<string | null, Set<ID>>();
-      for (const item of await readItems()) {
+      for (const item of current.items) {
+        // Null/missing values live under the null key; core's null, $exists:false
+        // and $ne lookups read it.
         const key = serializeValue(getFieldValue(item, field));
-        if (key === null) continue;
         let ids = index.get(key);
         if (!ids) {
           ids = new Set();
@@ -431,21 +482,21 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         }
         ids.add(item.id);
       }
-      indexCache.set(field, index);
+      current.indexes.set(field, index);
       return index;
     },
-    insert: (items) => mutate((current) =>
-      items.length === 0 ? null : upsert(current, items)),
-    replace: (items) => mutate((current) =>
-      items.length === 0 ? null : upsert(current, items)),
+    insert: (items) => mutate((current) => upsert(current, items)),
+    replace: (items) => mutate((current) => upsert(current, items)),
     remove: (items) => mutate((current) => {
-      if (items.length === 0) return null;
-      const doomed = new Set(items.map((item) => item.id));
-      if (!current.some((item) => doomed.has(item.id))) return null;
-      return current.filter((item) => !doomed.has(item.id));
+      let changed = false;
+      for (const item of items) changed = current.delete(item.id) || changed;
+      return changed;
     }),
-    removeAll: () => mutate((current) =>
-      current.length === 0 ? null : []),
+    removeAll: () => mutate((current) => {
+      if (current.size === 0) return false;
+      current.clear();
+      return true;
+    }),
   });
 }
 

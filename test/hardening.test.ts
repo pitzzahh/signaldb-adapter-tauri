@@ -5,7 +5,7 @@
  * large encrypted payloads, corrupt-file warnings, rename failures,
  * and backup/verify/cleanup failure warnings.
  */
-import { test, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 import { BaseDirectory } from '@tauri-apps/plugin-fs';
 import { adapter as createAdapter } from '../src/index';
 import { createEncryption } from '../src/encryption';
@@ -140,6 +140,36 @@ test('Same-tick writes batch into one file rewrite', async () => {
     { id: 'a', name: 'first', value: 1 },
     { id: 'b', name: 'second', value: 2 },
     { id: 'c', name: 'third', value: 3 },
+  ]);
+  const temp_writes = mock_write_file.mock.calls.filter(([name]) =>
+    (name as string).includes('.tmp.')
+  );
+  expect(temp_writes.length).toBe(1);
+});
+
+test('Mixed ops in one batch apply in order and keep item positions', async () => {
+  const adapter = createAdapter<TestData>('batched-mixed.json');
+  await adapter.setup();
+  await adapter.insert([
+    { id: 'a', name: 'first', value: 1 },
+    { id: 'b', name: 'second', value: 2 },
+    { id: 'c', name: 'third', value: 3 },
+  ]);
+
+  mock_write_file.mockClear();
+  await Promise.all([
+    adapter.replace([{ id: 'b', name: 'second-v2', value: 20 }]),
+    adapter.remove([{ id: 'a', name: 'first', value: 1 }]),
+    adapter.insert([{ id: 'd', name: 'fourth', value: 4 }]),
+    adapter.remove([{ id: 'd', name: 'fourth', value: 4 }]),
+    adapter.insert([{ id: 'e', name: 'fifth', value: 5 }]),
+    adapter.remove([{ id: 'missing', name: 'x', value: 0 }]),
+  ]);
+
+  expect(await adapter.readAll()).toEqual([
+    { id: 'b', name: 'second-v2', value: 20 },
+    { id: 'c', name: 'third', value: 3 },
+    { id: 'e', name: 'fifth', value: 5 },
   ]);
   const temp_writes = mock_write_file.mock.calls.filter(([name]) =>
     (name as string).includes('.tmp.')
@@ -384,11 +414,13 @@ test('Backup listing failure warns but write succeeds', async () => {
 });
 
 test('Decrypted data failing validation propagates without wrapping', async () => {
-  const adapter = createAdapter<TestData>('decrypt-invalid.json', {
-    encrypt: async (data) => JSON.stringify(data),
+  const codec = {
+    encrypt: async (data: TestData[]) => JSON.stringify(data),
     decrypt: async () => ({ not: 'an-array' }) as any,
-  });
-  await adapter.setup();
+  };
+  await createAdapter<TestData>('decrypt-invalid.json', codec).setup();
+  // A fresh instance has no cached snapshot, so it must decrypt the file.
+  const adapter = createAdapter<TestData>('decrypt-invalid.json', codec);
 
   // Anchored: a 'Failed to load' prefix would mean the error got wrapped.
   await expect(adapter.readAll()).rejects.toThrow(/^Decryption failed, plaintext fallback disabled/);
@@ -555,4 +587,214 @@ test('Batch insert upserts same-id entries instead of duplicating', async () => 
   await adapter.insert(next);
 
   expect(await adapter.readAll()).toEqual(next);
+});
+
+// ─── Decoded snapshot cache ───
+
+const countingCodec = () => {
+  const codec = {
+    decrypts: 0,
+    encrypt: async (data: unknown[]) => btoa(JSON.stringify(data)),
+    decrypt: async (text: string) => {
+      codec.decrypts++;
+      return JSON.parse(atob(text));
+    },
+  };
+  return codec;
+};
+
+// Counts AES-GCM decrypts done by the real createEncryption codec.
+const countAesDecrypts = () => spyOn(crypto.subtle, 'decrypt');
+
+test('createEncryption stores skip decrypt while the file is unchanged', async () => {
+  const codec = createEncryption('long-enough-passphrase');
+  const adapter = createAdapter<TestData>('snap-hit.json', codec);
+  const decrypts = countAesDecrypts();
+  try {
+    await adapter.setup();
+    await adapter.insert([{ id: '1', name: 'a', value: 1 }]);
+    await adapter.insert([{ id: '2', name: 'b', value: 2 }]);
+    await adapter.readIds(['1']);
+    await adapter.createIndex('value');
+    await adapter.readIndex('value');
+    expect(await adapter.readAll()).toHaveLength(2);
+    expect(decrypts).toHaveBeenCalledTimes(0);
+  } finally {
+    decrypts.mockRestore();
+  }
+});
+
+test('A custom codec declared jsonCodec skips decrypt after its own writes', async () => {
+  for (const jsonCodec of [true, false]) {
+    const codec = countingCodec();
+    const adapter = createAdapter<TestData>(`snap-json-codec-${jsonCodec}.json`, { ...codec, jsonCodec });
+    await adapter.setup();
+    await adapter.insert([{ id: '1', name: 'a', value: 1 }]);
+    await adapter.insert([{ id: '2', name: 'b', value: 2 }]);
+    expect(await adapter.readAll()).toHaveLength(2);
+    // Undeclared: both inserts' guard reads and readAll decrypt.
+    expect(codec.decrypts).toBe(jsonCodec ? 0 : 3);
+  }
+
+  // An outside edit is still decrypted even when declared.
+  const codec = countingCodec();
+  const adapter = createAdapter<TestData>('snap-json-codec-ext.json', { ...codec, jsonCodec: true });
+  await adapter.setup();
+  await adapter.insert([{ id: '1', name: 'a', value: 1 }]);
+  mock_file_system.set(`${BaseDirectory.AppLocalData}/snap-json-codec-ext.json`,
+    new TextEncoder().encode(await codec.encrypt([{ id: 'x', name: 'ext', value: 9 }])));
+  expect(await adapter.readAll()).toEqual([{ id: 'x', name: 'ext', value: 9 }]);
+  expect(codec.decrypts).toBe(1);
+});
+
+test('An external edit to the file is decoded, not served from cache', async () => {
+  const codec = createEncryption('long-enough-passphrase');
+  const adapter = createAdapter<TestData>('snap-external.json', codec);
+  await adapter.setup();
+  await adapter.insert([{ id: '1', name: 'a', value: 1 }]);
+
+  const path = `${BaseDirectory.AppLocalData}/snap-external.json`;
+  mock_file_system.set(path, new TextEncoder().encode(
+    await codec.encrypt([{ id: 'x', name: 'external', value: 9 }])
+  ));
+
+  const decrypts = countAesDecrypts();
+  try {
+    expect(await adapter.readAll()).toEqual([{ id: 'x', name: 'external', value: 9 }]);
+    await adapter.insert([{ id: '2', name: 'b', value: 2 }]);
+    expect((await adapter.readAll()).map((item) => item.id)).toEqual(['x', '2']);
+    expect(decrypts).toHaveBeenCalledTimes(1);
+  } finally {
+    decrypts.mockRestore();
+  }
+});
+
+test('Cached writes read back the same as a fresh instance', async () => {
+  for (const codec of [undefined, createEncryption('long-enough-passphrase')]) {
+    const name = codec ? 'snap-json-enc.json' : 'snap-json.json';
+    const adapter = createAdapter<any>(name, codec);
+    const fresh = () => createAdapter<any>(name, codec).readAll();
+    await adapter.setup();
+
+    await adapter.insert([{ id: '1', at: new Date(0), gone: undefined, nan: NaN }]);
+    expect(await fresh()).toEqual([{ id: '1', at: '1970-01-01T00:00:00.000Z', nan: null }]);
+    expect(await adapter.readAll()).toEqual(await fresh());
+
+    await adapter.insert([{ id: '2', fn: () => 1 }]);
+    expect(await adapter.readAll()).toEqual(await fresh());
+    expect((await fresh())[1]).toEqual({ id: '2' });
+  }
+});
+
+test('A custom codec is decoded after each write, not cached from the input', async () => {
+  const codec = countingCodec();
+  // Revives a field on the way out, so decrypt(encrypt(x)) differs from x.
+  const reviving = {
+    encrypt: codec.encrypt,
+    decrypt: async (text: string) =>
+      (await codec.decrypt(text)).map((item: any) => ({ ...item, revived: true })),
+  };
+  const adapter = createAdapter<any>('snap-custom.json', reviving);
+  await adapter.setup();
+  await adapter.insert([{ id: '1' }]);
+
+  expect(await adapter.readAll()).toEqual([{ id: '1', revived: true }]);
+  await adapter.readAll();
+  // setup's file on the first guard read, then the written file once.
+  expect(codec.decrypts).toBe(2);
+});
+
+test('Two instances on one file never lose each other\'s writes', async () => {
+  const first = createAdapter<TestData>('snap-shared.json', countingCodec());
+  const second = createAdapter<TestData>('snap-shared.json', countingCodec());
+  await first.setup();
+  await first.insert([{ id: '1', name: 'a', value: 1 }]);
+  await second.insert([{ id: '2', name: 'b', value: 2 }]);
+  await first.insert([{ id: '3', name: 'c', value: 3 }]);
+
+  expect((await second.readAll()).map((item) => item.id)).toEqual(['1', '2', '3']);
+});
+
+test('Mutating read results or written inputs cannot leak into the file', async () => {
+  const codecs = [undefined, countingCodec(), createEncryption('long-enough-passphrase')];
+  for (const [i, codec] of codecs.entries()) {
+    const name = `snap-clone-${i}.json`;
+    const adapter = createAdapter<TestData>(name, codec);
+    await adapter.setup();
+    const input = { id: '1', name: 'a', value: 1 };
+    await adapter.insert([input]);
+    input.value = 100;
+
+    const [read] = await adapter.readAll();
+    read.value = 200;
+    const [byId] = await adapter.readIds(['1']);
+    byId.value = 300;
+
+    await adapter.insert([{ id: '2', name: 'b', value: 2 }]);
+    expect(await adapter.readAll()).toEqual([
+      { id: '1', name: 'a', value: 1 },
+      { id: '2', name: 'b', value: 2 },
+    ]);
+  }
+});
+
+test('readIndex racing a write never caches a stale index', async () => {
+  const adapter = createAdapter<TestData>('snap-index-race.json', countingCodec());
+  await adapter.setup();
+  await adapter.insert([{ id: '1', name: 'a', value: 1 }]);
+  await adapter.createIndex('value');
+
+  // Hold readIndex's file read until the write has landed, then hand it
+  // the old bytes: the read-modify-write interleaving that went stale.
+  const path = `${BaseDirectory.AppLocalData}/snap-index-race.json`;
+  const old_bytes = mock_file_system.get(path)!;
+  let release!: () => void;
+  const written = new Promise<void>((resolve) => { release = resolve; });
+  mock_read_file.mockImplementationOnce(async () => {
+    await written;
+    return old_bytes;
+  });
+
+  const stale_read = adapter.readIndex('value');
+  await adapter.insert([{ id: '2', name: 'b', value: 1 }]);
+  release();
+  expect((await stale_read).get('1')).toEqual(new Set(['1']));
+
+  const fresh = await adapter.readIndex('value');
+  expect(fresh.get('1')).toEqual(new Set(['1', '2']));
+});
+
+// ─── Backups reuse the guard read ───
+
+test('Backups hold the exact pre-write bytes without an extra file read', async () => {
+  const adapter = createAdapter<TestData>('backup-bytes.json', {
+    security: { createBackups: true },
+  });
+  const path = `${BaseDirectory.AppLocalData}/backup-bytes.json`;
+  // A BOM survives JSON.parse but not a decode/encode round trip.
+  const original = new TextEncoder().encode('[{"id":"1","name":"a","value":1}]');
+  const bom_bytes = new Uint8Array([0xef, 0xbb, 0xbf, ...original]);
+  mock_file_system.set(path, bom_bytes);
+
+  mock_read_file.mockClear();
+  await adapter.insert([{ id: '2', name: 'b', value: 2 }]);
+
+  const backups = [...mock_file_system.keys()].filter((key) => key.includes('backup-bytes.json.backup.'));
+  expect(backups).toHaveLength(1);
+  expect(mock_file_system.get(backups[0])).toEqual(bom_bytes);
+  // Guard read plus temp-file verification; the backup costs no read.
+  const reads = mock_read_file.mock.calls.map(([name]) => name as string);
+  expect(reads.filter((name) => name === 'backup-bytes.json')).toHaveLength(1);
+});
+
+test('A missing file is not backed up and does not warn', async () => {
+  const adapter = createAdapter<TestData>('backup-missing.json', {
+    security: { createBackups: true },
+  });
+  await adapter.insert([{ id: '1', name: 'a', value: 1 }]);
+
+  const backups = [...mock_file_system.keys()].filter((key) => key.includes('.backup.'));
+  expect(backups).toHaveLength(0);
+  expect(warnings.some((w) => w.includes('Failed to create backup'))).toBe(false);
+  expect(await adapter.readAll()).toEqual([{ id: '1', name: 'a', value: 1 }]);
 });

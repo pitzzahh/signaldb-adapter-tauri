@@ -517,6 +517,10 @@ class NestedPerformanceTester {
   }
 }
 
+// Benchmarks measure, they don't assert speed. The scaling runs take
+// seconds by design, so bun's 5s default would fail them on a busy machine.
+const BENCH_TIMEOUT_MS = 60_000;
+
 // Configurable dataset sizes
 const DATASET_SIZES = {
   SMALL: 100,
@@ -582,7 +586,7 @@ describe('Performance Tests', () => {
     ]);
 
     expect(isValidTiming(insertTime)).toBe(true);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Burst insert performance - medium dataset', async () => {
     const itemCount = DATASET_SIZES.MEDIUM;
@@ -597,7 +601,7 @@ describe('Performance Tests', () => {
 
     expect(isValidTiming(burstTime)).toBe(true);
     expect(tester.count()).toBe(itemCount);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Load performance after inserting data', async () => {
     await tester.testInsertPerformance(DATASET_SIZES.MEDIUM);
@@ -613,7 +617,7 @@ describe('Performance Tests', () => {
 
     expect(itemCount).toBe(DATASET_SIZES.MEDIUM);
     expect(isValidTiming(loadTime)).toBe(true);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Update performance', async () => {
     const itemCount = DATASET_SIZES.MEDIUM;
@@ -627,7 +631,7 @@ describe('Performance Tests', () => {
     ]);
 
     expect(isValidTiming(updateTime)).toBe(true);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Delete performance', async () => {
     const itemCount = DATASET_SIZES.MEDIUM;
@@ -641,7 +645,7 @@ describe('Performance Tests', () => {
     ]);
 
     expect(isValidTiming(deleteTime)).toBe(true);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Query performance with various operations', async () => {
     const itemCount = DATASET_SIZES.LARGE;
@@ -655,7 +659,7 @@ describe('Performance Tests', () => {
     ]);
 
     expect(isValidTiming(queryTime)).toBe(true);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Memory usage during bulk operations', async () => {
     const itemCount = DATASET_SIZES.LARGE;
@@ -668,7 +672,7 @@ describe('Performance Tests', () => {
       { label: 'Memory delta', value: memoryStats.deltaMB, unit: 'MB' },
       { label: 'Memory per item', value: memoryStats.deltaMB / itemCount, unit: 'MB' }
     ]);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Encrypted vs unencrypted performance comparison', async () => {
     const itemCount = DATASET_SIZES.MEDIUM;
@@ -688,7 +692,7 @@ describe('Performance Tests', () => {
 
     expect(isValidTiming(encryptedTime)).toBe(true);
     expect(isValidTiming(unencryptedTime)).toBe(true);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Real AES-GCM write cost (per-write PBKDF2 derivation)', async () => {
     const { createEncryption } = await import('../src/encryption');
@@ -715,7 +719,7 @@ describe('Performance Tests', () => {
     ]);
 
     expect(isValidTiming(elapsed)).toBe(true);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Scaling: insert performance (100→1000)', async () => {
     const sizes = [DATASET_SIZES.SMALL, DATASET_SIZES.MEDIUM, DATASET_SIZES.LARGE];
@@ -732,7 +736,7 @@ describe('Performance Tests', () => {
 
     formatScalingTable('Insert Scaling (100→1000 items)', results);
     expect(results.every(r => isValidTiming(r.time))).toBe(true);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Scaling: nested insert performance (100→1000)', async () => {
     const sizes = [DATASET_SIZES.SMALL, DATASET_SIZES.MEDIUM, DATASET_SIZES.LARGE];
@@ -749,7 +753,7 @@ describe('Performance Tests', () => {
 
     formatScalingTable('Nested Insert Scaling (100→1000 items)', results);
     expect(results.every(r => isValidTiming(r.time))).toBe(true);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Nested data query performance', async () => {
     const itemCount = DATASET_SIZES.MEDIUM;
@@ -763,7 +767,7 @@ describe('Performance Tests', () => {
     ]);
 
     expect(isValidTiming(queryTime)).toBe(true);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Nested data update performance', async () => {
     const itemCount = DATASET_SIZES.MEDIUM;
@@ -777,7 +781,7 @@ describe('Performance Tests', () => {
     ]);
 
     expect(isValidTiming(updateTime)).toBe(true);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Memory usage with nested dataset', async () => {
     const getMemoryUsage = () => {
@@ -799,7 +803,7 @@ describe('Performance Tests', () => {
       { label: 'Memory delta', value: deltaMB, unit: 'MB' },
       { label: 'Memory per item', value: deltaMB / DATASET_SIZES.MEDIUM, unit: 'MB' }
     ]);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Scaling: simple vs nested insert comparison', async () => {
     const itemCount = DATASET_SIZES.MEDIUM;
@@ -828,7 +832,7 @@ describe('Performance Tests', () => {
 
     expect(isValidTiming(nestedTime)).toBe(true);
     expect(isValidTiming(simpleTime)).toBe(true);
-  });
+  }, BENCH_TIMEOUT_MS);
 
   test('Scaling: large dataset load performance', async () => {
     await tester.testInsertPerformance(DATASET_SIZES.LARGE);
@@ -844,5 +848,5 @@ describe('Performance Tests', () => {
 
     expect(itemCount).toBe(DATASET_SIZES.LARGE);
     expect(isValidTiming(loadTime)).toBe(true);
-  });
+  }, BENCH_TIMEOUT_MS);
 });
