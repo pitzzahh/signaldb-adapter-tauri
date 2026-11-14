@@ -99,7 +99,7 @@ const secure = adapter('secure-data.json', {
 });
 ```
 
-`createEncryption` uses AES-256-GCM with PBKDF2 key derivation (100k iterations by default, configurable). Each write gets a fresh salt and IV, so identical data never produces identical files. Tampered files fail decryption instead of loading garbage. Pick the iteration count once per store: it is not stored in the file header, so raising it later makes existing files undecryptable.
+`createEncryption` uses AES-256-GCM with PBKDF2 key derivation (100k iterations by default, configurable). Each `createEncryption` instance derives its key once from a random salt, and every write gets a fresh random IV, so identical data never produces identical files. Tampered files fail decryption instead of loading garbage. Pick the iteration count once per store: it is not stored in the file header, so raising it later makes existing files undecryptable.
 
 Key rotation uses versioned passphrases. Old versions keep decrypting legacy files while new writes use the current key:
 
