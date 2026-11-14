@@ -624,6 +624,29 @@ test('createEncryption stores skip decrypt while the file is unchanged', async (
   }
 });
 
+test('A custom codec declared jsonCodec skips decrypt after its own writes', async () => {
+  for (const jsonCodec of [true, false]) {
+    const codec = countingCodec();
+    const adapter = createAdapter<TestData>(`snap-json-codec-${jsonCodec}.json`, { ...codec, jsonCodec });
+    await adapter.setup();
+    await adapter.insert([{ id: '1', name: 'a', value: 1 }]);
+    await adapter.insert([{ id: '2', name: 'b', value: 2 }]);
+    expect(await adapter.readAll()).toHaveLength(2);
+    // Undeclared: both inserts' guard reads and readAll decrypt.
+    expect(codec.decrypts).toBe(jsonCodec ? 0 : 3);
+  }
+
+  // An outside edit is still decrypted even when declared.
+  const codec = countingCodec();
+  const adapter = createAdapter<TestData>('snap-json-codec-ext.json', { ...codec, jsonCodec: true });
+  await adapter.setup();
+  await adapter.insert([{ id: '1', name: 'a', value: 1 }]);
+  mock_file_system.set(`${BaseDirectory.AppLocalData}/snap-json-codec-ext.json`,
+    new TextEncoder().encode(await codec.encrypt([{ id: 'x', name: 'ext', value: 9 }])));
+  expect(await adapter.readAll()).toEqual([{ id: 'x', name: 'ext', value: 9 }]);
+  expect(codec.decrypts).toBe(1);
+});
+
 test('An external edit to the file is decoded, not served from cache', async () => {
   const codec = createEncryption('long-enough-passphrase');
   const adapter = createAdapter<TestData>('snap-external.json', codec);

@@ -202,7 +202,8 @@ Why this shape: the vault password is the only secret the user must remember, an
 |--------|------|---------|-------------|
 | `base_dir` | `BaseDirectory` | `AppLocalData` | Tauri base directory for file storage |
 | `encrypt` | `(data: T[]) => Promise<string>` | `undefined` | Custom encryption function (requires `decrypt`) |
-| `decrypt` | `(encrypted: string) => Promise<T[]>` | `undefined` | Custom decryption function (requires `encrypt`). With a custom pair, the read after each write decrypts the file; `createEncryption` skips that. |
+| `decrypt` | `(encrypted: string) => Promise<T[]>` | `undefined` | Custom decryption function (requires `encrypt`). With a custom pair, the read after each write decrypts the file unless `jsonCodec` is set; `createEncryption` always skips it. |
+| `jsonCodec` | `boolean` | `true` for `createEncryption`, else `false` | Promise that `decrypt(encrypt(x))` equals `JSON.parse(JSON.stringify(x))`. The read after each write then parses the written JSON instead of decrypting, and reads clone by JSON parse. Leave unset if your codec revives `Date`s or other non-JSON types. |
 | `security` | `Partial<SecurityOptions>` | `{}` | Security configuration options |
 
 ```typescript
@@ -225,6 +226,7 @@ export interface AdapterOptions<T> {
   base_dir?: import('@tauri-apps/plugin-fs').BaseDirectory;
   encrypt?: (data: T[]) => Promise<string>;
   decrypt?: (encrypted: string) => Promise<T[]>;
+  jsonCodec?: boolean;
   security?: Partial<SecurityOptions>;
 }
 

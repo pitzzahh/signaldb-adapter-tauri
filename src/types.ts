@@ -28,6 +28,13 @@ export interface AdapterOptions<T> {
   base_dir?: import('@tauri-apps/plugin-fs').BaseDirectory;
   encrypt?: (data: T[]) => Promise<string>;
   decrypt?: (encrypted: string) => Promise<T[]>;
+  /**
+   * Set true when `decrypt(encrypt(x))` always equals `JSON.parse(JSON.stringify(x))`,
+   * e.g. encrypt is `seal(JSON.stringify(data))` and decrypt is `JSON.parse(open(text))`.
+   * The read after each write then parses the written JSON instead of decrypting.
+   * Defaults to true for `createEncryption`, false for other custom pairs.
+   */
+  jsonCodec?: boolean;
   security?: Partial<SecurityOptions>;
 }
 

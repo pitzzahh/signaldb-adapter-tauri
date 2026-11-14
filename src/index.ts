@@ -137,8 +137,8 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
   // read finds the same bytes: that read skips PBKDF2. Plain stores parse
   // their file anyway, and other codecs may change data on the way
   // through, so their writes are simply decoded on the next read.
-  const jsonCodec = !options?.encrypt ||
-    (isJsonCodec(options.encrypt) && isJsonCodec(options.decrypt));
+  const jsonCodec = !options?.encrypt || (options.jsonCodec ??
+    (isJsonCodec(options.encrypt) && isJsonCodec(options.decrypt)));
   let written: { text: string; json: string } | null = null;
   // Backup names known to this instance (newest first). Seeded once from
   // the directory so per-write pruning needs no readDir scan.
