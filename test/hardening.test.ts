@@ -693,8 +693,9 @@ test('Two instances on one file never lose each other\'s writes', async () => {
 });
 
 test('Mutating read results or written inputs cannot leak into the file', async () => {
-  for (const codec of [undefined, countingCodec()]) {
-    const name = codec ? 'snap-clone-enc.json' : 'snap-clone.json';
+  const codecs = [undefined, countingCodec(), createEncryption('long-enough-passphrase')];
+  for (const [i, codec] of codecs.entries()) {
+    const name = `snap-clone-${i}.json`;
     const adapter = createAdapter<TestData>(name, codec);
     await adapter.setup();
     const input = { id: '1', name: 'a', value: 1 };

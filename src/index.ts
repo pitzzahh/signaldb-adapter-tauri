@@ -126,6 +126,8 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
   type Snapshot = {
     text: string;
     items: T[];
+    // JSON that parses to items, when known: parsing it beats structuredClone.
+    json?: string;
     indexes: Map<string, Map<string | null, Set<ID>>>;
   };
   let snapshot: Snapshot | null = null;
@@ -174,7 +176,7 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         try {
           const items = JSON.parse(json);
           validate(items, 'Data failed validation');
-          snapshot = { text: text_content, items, indexes: new Map() };
+          snapshot = { text: text_content, items, json, indexes: new Map() };
         } catch {
           // Fall through and decode the file, which reports the real error.
         }
@@ -224,7 +226,12 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         }
       }
 
-      snapshot = { text: text_content, items: decrypted_data, indexes: new Map() };
+      snapshot = {
+        text: text_content,
+        items: decrypted_data,
+        json: options?.decrypt ? undefined : text_content,
+        indexes: new Map(),
+      };
       return snapshot;
     } catch (error) {
       if (error instanceof CorruptDataError) throw error;
@@ -412,6 +419,11 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
   };
 
   // Map.set keeps an existing id in place and appends a new one.
+  // JSON-codec items are JSON-safe, so a JSON round trip is a faithful
+  // and much cheaper clone than structuredClone.
+  const clone = (items: T[]): T[] =>
+    jsonCodec ? JSON.parse(JSON.stringify(items)) : structuredClone(items);
+
   const upsert = (items: Map<ID, T>, incoming: T[]): boolean => {
     for (const item of incoming) items.set(item.id, item);
     return incoming.length > 0;
@@ -427,16 +439,19 @@ export function adapter<T extends { id: ID } & Record<string, any>, ID = string>
         await writeFile(filename, encoder.encode(initial_data), {
           baseDir: base_dir
         });
-        snapshot = jsonCodec ? { text: initial_data, items: [], indexes: new Map() } : null;
+        snapshot = jsonCodec ? { text: initial_data, items: [], json: '[]', indexes: new Map() } : null;
       } catch (error) {
         throw new Error(`Failed to initialize file ${filename}`, { cause: error });
       }
     },
     teardown: async () => {},
-    readAll: async () => structuredClone((await readItems()).items),
+    async readAll() {
+      const { items, json } = await readItems();
+      return json ? JSON.parse(json) : clone(items);
+    },
     async readIds(ids) {
       const wanted = new Set(ids);
-      return structuredClone((await readItems()).items.filter((item) => wanted.has(item.id)));
+      return clone((await readItems()).items.filter((item) => wanted.has(item.id)));
     },
     async createIndex(field) {
       createdIndexes.add(field);
