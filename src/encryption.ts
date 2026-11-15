@@ -5,7 +5,7 @@
  */
 
 import type { EncryptedPayload, EncryptionOptions } from './types';
-import { eMsg, encoder, decoder } from './utils';
+import { eMsg, encoder, decoder, JSON_CODEC } from './utils';
 
 /** Salt length in bytes (128 bits) */
 const SALT_LENGTH = 16;
@@ -25,18 +25,6 @@ const VERSION_SEPARATOR = ':';
 const VERSION_PREFIX = 'v';
 
 // ─── Internal helpers ───────────────────────────────────────────────────
-
-/** Concatenate Uint8Arrays into a single buffer. */
-function concat(...arrays: Uint8Array[]): Uint8Array {
-  const total = arrays.reduce((sum, a) => sum + a.byteLength, 0);
-  const result = new Uint8Array(total);
-  let offset = 0;
-  for (const a of arrays) {
-    result.set(a, offset);
-    offset += a.byteLength;
-  }
-  return result;
-}
 
 /**
  * Derive an AES-256-GCM key from key material using PBKDF2.
@@ -95,16 +83,18 @@ function parseVersionedPayload(raw: string): EncryptedPayload | null {
 
 /**
  * Encode a binary payload into the versioned string format.
- * Chunked to avoid O(n^2) concat and btoa stack limits on large payloads.
+ * fromCharCode.apply, not a ...spread: spreading a typed array goes through
+ * its iterator and is ~6x slower. CHUNK is a multiple of 3, so per-chunk
+ * btoa pads only the last chunk and the output equals one btoa call.
  */
 function encodeVersionedPayload(version: number, payload: Uint8Array): string {
-  const CHUNK = 0x2000;
-  let binary = '';
+  const CHUNK = 0x3000;
+  const parts: string[] = [];
   for (let i = 0; i < payload.byteLength; i += CHUNK) {
-    const sub = payload.subarray(i, i + CHUNK);
-    binary += String.fromCharCode(...sub);
+    const sub = payload.subarray(i, i + CHUNK) as unknown as number[];
+    parts.push(btoa(String.fromCharCode.apply(null, sub)));
   }
-  return `${VERSION_PREFIX}${version}${VERSION_SEPARATOR}${btoa(binary)}`;
+  return `${VERSION_PREFIX}${version}${VERSION_SEPARATOR}${parts.join('')}`;
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────
@@ -152,8 +142,7 @@ export function createEncryption(
     );
   }
 
-  // importKey per passphrase is cached: deriveKey still runs per message
-  // (salts are random), but the redundant import is paid once.
+  // importKey per passphrase is cached, so the import is paid once.
   const keyMaterialCache = new Map<string, Promise<CryptoKey>>();
   const getKeyMaterial = (passphrase: string): Promise<CryptoKey> => {
     let cached = keyMaterialCache.get(passphrase);
@@ -170,12 +159,31 @@ export function createEncryption(
     return cached;
   };
 
+  // PBKDF2 runs once per (version, salt), not once per message. Each
+  // instance encrypts under one random salt, so writes reuse one derived
+  // key; AES-GCM stays safe because every message gets a fresh random IV
+  // (NIST's 2^32-messages-per-key bound is far beyond one app session).
+  const encryptSalt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
+  const derivedKeys = new Map<string, Promise<CryptoKey>>();
+  const getKey = (version: number, passphrase: string, salt: Uint8Array<ArrayBuffer>): Promise<CryptoKey> => {
+    const id = `${version}:${salt.join(',')}`;
+    let key = derivedKeys.get(id);
+    if (!key) {
+      // Bounds memory if many foreign-salted payloads are decrypted.
+      if (derivedKeys.size >= 8) derivedKeys.clear();
+      key = getKeyMaterial(passphrase).then((material) => deriveKey(material, salt, iterations));
+      derivedKeys.set(id, key);
+      key.catch(() => derivedKeys.delete(id));
+    }
+    return key;
+  };
+
   const encrypt = async <T>(data: T[]): Promise<string> => {
     const passphrase = passphraseMap[activeVersion];
-    const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
+    const salt = encryptSalt;
     const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
 
-    const key = await deriveKey(await getKeyMaterial(passphrase), salt, iterations);
+    const key = await getKey(activeVersion, passphrase, salt);
 
     const plaintext = encoder.encode(JSON.stringify(data));
     // AES-GCM appends the 16-byte authentication tag to the ciphertext
@@ -185,7 +193,11 @@ export function createEncryption(
       plaintext,
     );
 
-    const binaryPayload = concat(salt, iv, new Uint8Array(encrypted));
+    const encryptedBytes = new Uint8Array(encrypted);
+    const binaryPayload = new Uint8Array(SALT_LENGTH + IV_LENGTH + encryptedBytes.byteLength);
+    binaryPayload.set(salt, 0);
+    binaryPayload.set(iv, SALT_LENGTH);
+    binaryPayload.set(encryptedBytes, SALT_LENGTH + IV_LENGTH);
     return encodeVersionedPayload(activeVersion, binaryPayload);
   };
 
@@ -216,7 +228,7 @@ export function createEncryption(
     const iv = payload.subarray(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
     const ciphertext = payload.subarray(SALT_LENGTH + IV_LENGTH);
 
-    const key = await deriveKey(await getKeyMaterial(passphrase), salt, iterations);
+    const key = await getKey(version, passphrase, salt);
 
     let decrypted: ArrayBuffer;
     try {
@@ -241,5 +253,6 @@ export function createEncryption(
     return parsed_data;
   };
 
+  (encrypt as any)[JSON_CODEC] = (decrypt as any)[JSON_CODEC] = true;
   return { encrypt, decrypt };
 }

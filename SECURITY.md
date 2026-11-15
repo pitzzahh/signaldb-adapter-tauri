@@ -4,20 +4,22 @@
 
 We actively maintain and provide security updates for the following versions of `@pitzzahh/signaldb-adapter-tauri`:
 
-| Version | Supported          | Notes                                         |
-| ------- | ------------------ | --------------------------------------------- |
-| 3.1.x   | :white_check_mark: | Latest stable, recommended                    |
-| 3.0.x   | :white_check_mark: | Still supported                               |
-| 2.4.x   | :white_check_mark: | Still supported                               |
-| 2.3.x   | :white_check_mark: | Still supported (hardening backported: 2.3.1) |
-| 2.2.x   | :warning:          | Critical security fixes only (patched: 2.2.2) |
-| 2.1.x   | :warning:          | Critical security fixes only (patched: 2.1.7) |
-| 2.0.x   | :x:                | No longer supported                           |
-| 1.x.x   | :x:                | No longer supported                           |
-| < 1.0   | :x:                | No longer supported                           |
+| Version | Supported          | Notes                                            |
+| ------- | ------------------ | ------------------------------------------------ |
+| 4.0.x   | :white_check_mark: | Latest stable, recommended (`@signaldb/core` 2.x) |
+| 3.1.x   | :white_check_mark: | Still supported (`@signaldb/core` 1.x line)        |
+| 3.0.x   | :warning:          | Critical security fixes only (upgrade to 3.1.x)    |
+| 2.4.x   | :white_check_mark: | Still supported                                    |
+| 2.3.x   | :white_check_mark: | Still supported (hardening backported: 2.3.1)      |
+| 2.2.x   | :warning:          | Critical security fixes only (patched: 2.2.2)      |
+| 2.1.x   | :warning:          | Critical security fixes only (patched: 2.1.7)      |
+| 2.0.x   | :x:                | No longer supported                                |
+| 1.x.x   | :x:                | No longer supported                                |
+| < 1.0   | :x:                | No longer supported                                |
 
 ### Security Features by Version
 
+- **v4.0.0+**: Same guarantees as v3.1.0 on the core 2.x `StorageAdapter` API; per-operation fail-closed writes, no-op writes skip the rewrite
 - **v3.1.0+**: Fail-closed saves (corrupt-file and temp-verify refusal), half-configured encryption rejected at construction
 - **v3.0.0+**: Same hardening as v2.4.x; slimmer API (`adapter`, encryption subpath)
 - **v2.4.0+**: Serialized saves, stricter filenames, passphrase warnings
@@ -138,6 +140,8 @@ try {
 - Files are written atomically to prevent corruption
 - Optional encryption protects data at rest
 - Optional automatic backups prevent data loss
+- No rollback protection: a stale copy of a valid encrypted file still decrypts. Swapping files requires local write access, at which point deletion is already possible, so this is accepted rather than fixed
+- One process per file: concurrent writers in another process can interleave read-modify-write and lose updates. Enforce single-instance if your app can launch twice
 
 ### Path Security
 - Filename sanitization prevents path traversal attacks
@@ -168,4 +172,4 @@ For general questions, please use [GitHub Issues](https://github.com/pitzzahh/si
 
 ---
 
-*This security policy is reviewed quarterly and updated as needed. Last updated: October 31, 2026*
+*This security policy is reviewed quarterly and updated as needed. Last updated: November 7, 2026*

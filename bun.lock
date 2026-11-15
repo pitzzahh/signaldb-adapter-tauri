@@ -5,19 +5,19 @@
     "": {
       "name": "signaldb-tauri-fs",
       "devDependencies": {
-        "@signaldb/core": "^1.8.1",
+        "@signaldb/core": "^2.0.0",
         "@tauri-apps/plugin-fs": "^2.7.1",
         "@types/bun": "^1.4.4",
         "typescript": "^7.0.2",
       },
       "peerDependencies": {
-        "@signaldb/core": "1.x",
+        "@signaldb/core": "2.x",
         "@tauri-apps/plugin-fs": "2.x",
       },
     },
   },
   "packages": {
-    "@signaldb/core": ["@signaldb/core@1.8.1", "", { "dependencies": { "fast-sort": "^3.4.1", "mingo": "^7.1.1" } }, "sha512-85+ehSokMaKrPue42wPLmF+tU2jfky99kC2UlamfYS64I1YMMCWDeOdx17PNMpTxLdGFlCgnDEpTZB5XO3HFyQ=="],
+    "@signaldb/core": ["@signaldb/core@2.0.0", "", { "dependencies": { "fast-sort": "^3.4.1", "mingo": "^7.2.4" } }, "sha512-8U2PXK+bd0/CKh4Wd6iwunmCyYactRCoqH1df4t5jj9+LOdTjMm1v+GKi7xjp2+IdLIAvUk/xOUuKn2L/sC7Eg=="],
 
     "@tauri-apps/api": ["@tauri-apps/api@2.12.4", "", {}, "sha512-pVmfis+4zT8H0Qhp3xPZx9Ju7kpzvA6rr/PSJPyuwfvucTQ8sVt61NYU9KMkK703UFlYadFmjKA4HhybOtN0gg=="],
 
@@ -71,7 +71,7 @@
 
     "fast-sort": ["fast-sort@3.4.1", "", {}, "sha512-76uvGPsF6So53sZAqenP9UVT3p5l7cyTHkLWVCMinh41Y8NDrK1IYXJgaBMfc1gk7nJiSRZp676kddFG2Aa5+A=="],
 
-    "mingo": ["mingo@7.2.2", "", {}, "sha512-ll8DV+C5RnV2zF3Jwendxhgqknofzp7KaDwmlpvqo4xrdMC5F7JTc2ToZOz//de84QymZTFY7LPHMViE8uNHhA=="],
+    "mingo": ["mingo@7.2.7", "", {}, "sha512-4IRY2mkJlAv/RmnLrXJyP01T6JW9tmD8NmOC7ANgTUW6B1AU8enDySHWREdMvY2yBv0xuQ1hzA1d4fEHYgDoXw=="],
 
     "typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
 

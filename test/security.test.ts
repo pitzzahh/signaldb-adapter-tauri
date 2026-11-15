@@ -94,8 +94,7 @@ beforeEach(() => {
     const message = args.join(' ');
     // Only suppress specific expected warnings
     if (message.includes('[SECURITY]') ||
-      message.includes('Failed to create backup') ||
-      message.includes('Incremental update mismatch')) {
+      message.includes('Failed to create backup')) {
       return; // Suppress these expected warnings
     }
     originalConsoleWarn(...args); // Show other warnings
@@ -190,7 +189,7 @@ test('Security: Decryption failure with no fallback throws error', async () => {
     security: { allowPlaintextFallback: false }
   });
 
-  await expect(adapter.load()).rejects.toThrow('Decryption failed, plaintext fallback disabled');
+  await expect(adapter.readAll()).rejects.toThrow('Decryption failed, plaintext fallback disabled');
 });
 
 test('Security: Data validation fails on corrupted data', async () => {
@@ -219,52 +218,10 @@ test('Security: Data validation fails on corrupted data', async () => {
     }
   });
 
-  await expect(adapter.load()).rejects.toThrow('Data failed validation');
+  await expect(adapter.readAll()).rejects.toThrow('Data failed validation');
 });
 
-test('Security: Callback errors propagate when enabled', async () => {
-  const failing_callback = mock(async () => {
-    throw new Error('Callback failed');
-  });
-
-  const adapter = createAdapter<TestData>('test.json', {
-    security: { propagateCallbackErrors: true }
-  });
-
-  await adapter.register(failing_callback);
-
-  const test_data: TestData[] = [{ id: '1', name: 'test', value: 42 }];
-
-  await expect(adapter.save(test_data, { added: test_data, modified: [], removed: [] }))
-    .rejects.toThrow('Change callback failed');
-});
-
-test('Security: Callback errors are silenced when disabled', async () => {
-  const originalWarn = console.warn;
-  const warnings: string[] = [];
-  console.warn = (message: string) => warnings.push(message);
-
-  const failing_callback = mock(async () => {
-    throw new Error('Callback failed');
-  });
-
-  const adapter = createAdapter<TestData>('test.json', {
-    security: { propagateCallbackErrors: false }
-  });
-
-  await adapter.register(failing_callback);
-
-  const test_data: TestData[] = [{ id: '1', name: 'test', value: 42 }];
-
-  // Should not throw
-  await adapter.save(test_data, { added: test_data, modified: [], removed: [] });
-
-  expect(warnings.some(w => w.includes('Change callback error'))).toBe(true);
-
-  console.warn = originalWarn;
-});
-
-test('Security: Backup files are created on save when enabled', async () => {
+test('Security: Backup files are created on write when enabled', async () => {
   // Set up existing data
   const existing_data = new TextEncoder().encode(JSON.stringify([
     { id: '1', name: 'existing', value: 1 }
@@ -274,10 +231,9 @@ test('Security: Backup files are created on save when enabled', async () => {
   const adapter = createAdapter<TestData>('test.json', {
     security: { createBackups: true }
   });
-  await adapter.register(mock());
+  await adapter.setup();
 
-  const new_data: TestData[] = [{ id: '2', name: 'new', value: 2 }];
-  await adapter.save(new_data, { added: new_data, modified: [], removed: [] });
+  await adapter.insert([{ id: '2', name: 'new', value: 2 }]);
 
   // Check that a backup file was created
   const backup_files = Array.from(mock_file_system.keys()).filter(key =>
@@ -295,10 +251,9 @@ test('Security: Backup files are NOT created by default (for sync scenarios)', a
   mock_file_system.set(`${BaseDirectory.AppLocalData}/test.json`, existing_data);
 
   const adapter = createAdapter<TestData>('test.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
-  const new_data: TestData[] = [{ id: '2', name: 'new', value: 2 }];
-  await adapter.save(new_data, { added: new_data, modified: [], removed: [] });
+  await adapter.insert([{ id: '2', name: 'new', value: 2 }]);
 
   // Check that NO backup files were created
   const backup_files = Array.from(mock_file_system.keys()).filter(key =>
@@ -310,10 +265,9 @@ test('Security: Backup files are NOT created by default (for sync scenarios)', a
 
 test('Security: Temporary files are cleaned up on successful write', async () => {
   const adapter = createAdapter<TestData>('test.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
-  const test_data: TestData[] = [{ id: '1', name: 'test', value: 42 }];
-  await adapter.save(test_data, { added: test_data, modified: [], removed: [] });
+  await adapter.insert([{ id: '1', name: 'test', value: 42 }]);
 
   // Check that no temporary files remain
   const temp_files = Array.from(mock_file_system.keys()).filter(key =>
@@ -323,48 +277,33 @@ test('Security: Temporary files are cleaned up on successful write', async () =>
   expect(temp_files.length).toBe(0);
 });
 
-test('Security: Data cloning prevents callback mutation', async () => {
-  let callback_data: any = null;
-  const callback = mock(async (data: any) => {
-    callback_data = data;
-    // Try to mutate the data
-    if (callback_data?.items) {
-      callback_data.items.push({ id: 'malicious', name: 'hacked', value: -1 });
-    }
-  });
-
+test('Security: Mutating read results does not corrupt the store', async () => {
   const adapter = createAdapter<TestData>('test.json');
-  await adapter.register(callback);
+  await adapter.setup();
 
   const original_data: TestData[] = [{ id: '1', name: 'test', value: 42 }];
-  await adapter.save(original_data, { added: original_data, modified: [], removed: [] });
+  await adapter.insert(original_data);
 
-  // Load data again to verify it wasn't mutated
-  const loaded_data = await adapter.load();
-  expect(loaded_data.items).toEqual(original_data);
-  expect(loaded_data.items).not.toContain({ id: 'malicious', name: 'hacked', value: -1 });
+  // Mutate what readAll handed back
+  const read = await adapter.readAll();
+  read.push({ id: 'malicious', name: 'hacked', value: -1 });
+  read[0].name = 'mutated';
+
+  // The store is unaffected: every read parses fresh bytes.
+  expect(await adapter.readAll()).toEqual(original_data);
 });
 
-test('Security: Race condition prevention in file operations', async () => {
-  // This test simulates rapid concurrent access
+test('Security: Concurrent writes do not corrupt the file', async () => {
   const adapter = createAdapter<TestData>('test.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
-  const operations: Promise<void>[] = [];
+  // Simulate multiple concurrent write operations
+  await Promise.all(Array.from({ length: 5 }, (_, i) =>
+    adapter.insert([{ id: `${i}`, name: `test${i}`, value: i }])
+  ));
 
-  // Simulate multiple concurrent save operations
-  for (let i = 0; i < 5; i++) {
-    const data: TestData[] = [{ id: `${i}`, name: `test${i}`, value: i }];
-    operations.push(
-      adapter.save(data, { added: data, modified: [], removed: [] })
-    );
-  }
-
-  // All operations should complete without corruption
-  await Promise.all(operations);
-
-  // The file should contain valid data (the last successful write)
-  const final_data = await adapter.load();
-  expect(Array.isArray(final_data.items)).toBe(true);
-  expect(final_data.items?.length).toBe(1);
+  // All operations should complete with every item present exactly once.
+  const final_data = await adapter.readAll();
+  expect(final_data.length).toBe(5);
+  expect(new Set(final_data.map((item) => item.id)).size).toBe(5);
 });

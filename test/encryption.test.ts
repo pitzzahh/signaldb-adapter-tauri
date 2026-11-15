@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test';
+import { test, expect, spyOn } from 'bun:test';
 import { createEncryption } from '../src/encryption';
 
 // ─── Basic functionality ─────────────────────────────────────────────────
@@ -46,7 +46,7 @@ test('encrypted output starts with version prefix', async () => {
   expect(encrypted.startsWith('v1:')).toBe(true);
 });
 
-test('encrypted output is unique per call (random salt + IV)', async () => {
+test('encrypted output is unique per call (random IV)', async () => {
   const { encrypt } = createEncryption('test-passphrase');
   const data = [{ id: '1' }];
 
@@ -58,6 +58,42 @@ test('encrypted output is unique per call (random salt + IV)', async () => {
   expect(a).not.toBe(b);
   expect(b).not.toBe(c);
   expect(a).not.toBe(c);
+});
+
+test('one instance derives its key once, with a fresh IV per message', async () => {
+  const derive = spyOn(crypto.subtle, 'deriveKey');
+  try {
+    const { encrypt, decrypt } = createEncryption('test-passphrase-12345');
+    const payloads = [];
+    for (let i = 0; i < 5; i++) payloads.push(await encrypt([{ id: String(i) }]));
+    for (const [i, p] of payloads.entries()) expect(await decrypt(p)).toEqual([{ id: String(i) }]);
+    expect(derive).toHaveBeenCalledTimes(1);
+
+    const bytes = (p: string) => Uint8Array.from(atob(p.slice(p.indexOf(':') + 1)), (c) => c.charCodeAt(0));
+    const salts = new Set(payloads.map((p) => bytes(p).subarray(0, 16).join()));
+    const ivs = new Set(payloads.map((p) => bytes(p).subarray(16, 28).join()));
+    expect(salts.size).toBe(1);
+    expect(ivs.size).toBe(5);
+
+    // Another instance (another app session) picks its own salt, and the
+    // first can still read its payloads.
+    const other = await createEncryption('test-passphrase-12345').encrypt([{ id: 'x' }]);
+    expect(bytes(other).subarray(0, 16).join()).not.toBe([...salts][0]);
+    expect(await decrypt(other)).toEqual([{ id: 'x' }]);
+  } finally {
+    derive.mockRestore();
+  }
+});
+
+test('large payloads encode as one standard base64 string', async () => {
+  const { encrypt, decrypt } = createEncryption('test-passphrase-12345');
+  // Spans many encode chunks; any stray mid-string padding would show up.
+  const data = Array.from({ length: 3000 }, (_, i) => ({ id: String(i), text: 'x'.repeat(i % 50) }));
+  const payload = await encrypt(data);
+  const b64 = payload.slice(payload.indexOf(':') + 1);
+  expect(b64.slice(0, -2)).not.toContain('=');
+  expect(btoa(atob(b64))).toBe(b64);
+  expect(await decrypt(payload)).toEqual(data);
 });
 
 // ─── Tampering detection ─────────────────────────────────────────────────

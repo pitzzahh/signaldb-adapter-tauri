@@ -88,7 +88,7 @@ test('Backup cleanup respects maxBackups limit', async () => {
   const adapter = createAdapter<TestData>('test.json', {
     security: { createBackups: true, maxBackups: 2 }
   });
-  await adapter.register(mock());
+  await adapter.setup();
 
   for (let i = 0; i < 5; i++) {
     const data: TestData[] = [{ id: `${i}`, name: `save${i}`, value: i }];
@@ -96,8 +96,7 @@ test('Backup cleanup respects maxBackups limit', async () => {
       `${BaseDirectory.AppLocalData}/test.json`,
       new TextEncoder().encode(JSON.stringify(data))
     );
-    await adapter.save(data, { added: data, modified: [], removed: [] });
-    await new Promise(r => setTimeout(r, 2)); // ensure unique backup filenames
+    await adapter.insert(data);
   }
 
   const backup_count = Array.from(mock_file_system.keys())
@@ -106,9 +105,9 @@ test('Backup cleanup respects maxBackups limit', async () => {
   expect(backup_count).toBeLessThanOrEqual(2);
 });
 
-test('Save throws instead of silently destroying data when load fails', async () => {
+test('Insert throws instead of silently destroying data when the read fails', async () => {
   const adapter = createAdapter<TestData>('test.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
   // Pre-populate with valuable data
   const existing: TestData[] = [
@@ -116,9 +115,9 @@ test('Save throws instead of silently destroying data when load fails', async ()
     { id: 'b', name: 'keep2', value: 2 },
     { id: 'c', name: 'keep3', value: 3 },
   ];
-  await adapter.save(existing, { added: existing, modified: [], removed: [] });
+  await adapter.insert(existing);
 
-  // Simulate a transient read failure when loading the main data file during save
+  // Simulate a transient read failure when reading the main data file during insert
   mock_read_file.mockImplementation(async (filename: string, options?: { baseDir?: BaseDirectory }) => {
     // Throw only when reading the main data file, not temp files
     if (filename === 'test.json') {
@@ -130,17 +129,17 @@ test('Save throws instead of silently destroying data when load fails', async ()
     return content;
   });
 
-  // Save should throw rather than silently destroy data
+  // Insert should throw rather than silently destroy data
   const new_item: TestData[] = [{ id: 'd', name: 'new', value: 4 }];
 
-  let save_threw = false;
+  let insert_threw = false;
   try {
-    await adapter.save(new_item, { added: new_item, modified: [], removed: [] });
+    await adapter.insert(new_item);
   } catch (err: any) {
-    save_threw = true;
-    expect(err.message).toContain('Refusing to save to prevent data loss');
+    insert_threw = true;
+    expect(err.message).toContain('refusing to write to prevent data loss');
   }
-  expect(save_threw).toBe(true);
+  expect(insert_threw).toBe(true);
 
   // Original data should still be intact on disk. Reset mock and verify
   mock_read_file.mockImplementation(async (filename: string, options?: { baseDir?: BaseDirectory }) => {
@@ -149,40 +148,42 @@ test('Save throws instead of silently destroying data when load fails', async ()
     if (!content) throw new Error(`File not found: ${filename}`);
     return content;
   });
-  const result = await adapter.load();
-  expect(result.items?.length).toBe(3);
-  expect(result.items).toEqual(existing);
+  const result = await adapter.readAll();
+  expect(result.length).toBe(3);
+  expect(result).toEqual(existing);
 });
 
-test('Concurrent full-state saves are atomic: last write wins cleanly', async () => {
+test('Concurrent inserts are atomic: nothing lost, nothing mixed', async () => {
   const adapter = createAdapter<TestData>('test.json');
-  await adapter.register(mock());
+  await adapter.setup();
 
-  // Concurrent saves, each saving a full independent dataset.
-  // With atomic rename, the last one to complete wins without corruption.
+  // Concurrent inserts, each with an independent batch.
+  // Serialization means every batch lands whole: no lost items,
+  // no torn files, no interleaved read-modify-write.
   const ops: Promise<void>[] = [];
   for (let i = 1; i <= 5; i++) {
     const data: TestData[] = [
       { id: `${i}-a`, name: `item-a-${i}`, value: i },
       { id: `${i}-b`, name: `item-b-${i}`, value: i * 10 },
     ];
-    ops.push(adapter.save(data, { added: data, modified: [], removed: [] }));
+    ops.push(adapter.insert(data));
   }
   await Promise.all(ops);
 
-  // Final state should be exactly one complete dataset (the last write that won),
-  // not a corrupted mix of partial writes.
-  const result = await adapter.load();
-  expect(result.items).toBeDefined();
-  expect(Array.isArray(result.items)).toBe(true);
-  expect(result.items!.length).toBe(2); // exactly 2 items from one winner
+  // Final state holds all five batches complete.
+  const result = await adapter.readAll();
+  expect(result).toBeDefined();
+  expect(Array.isArray(result)).toBe(true);
+  expect(result.length).toBe(10);
 
-  // All items should belong to the same save batch (same `i` prefix)
-  const prefixes = new Set(result.items!.map((item: TestData) => item.id.split('-')[0]));
-  expect(prefixes.size).toBe(1); // all from the same batch, no mixed corruption
+  // Every batch arrived whole: both items of each `i` pair present.
+  for (let i = 1; i <= 5; i++) {
+    expect(result).toContainEqual({ id: `${i}-a`, name: `item-a-${i}`, value: i });
+    expect(result).toContainEqual({ id: `${i}-b`, name: `item-b-${i}`, value: i * 10 });
+  }
 
-  // Data should be valid JSON, not corrupted
-  for (const item of result.items!) {
+  // Data should be valid, not corrupted
+  for (const item of result) {
     expect(item).toHaveProperty('id');
     expect(item).toHaveProperty('name');
     expect(item).toHaveProperty('value');
